@@ -1,0 +1,12 @@
+Extract AUTHOR_CLAIM items and Evidence Quotes from the supplied full-text paper.
+
+Rules:
+1. Return only JSON matching the supplied schema.
+2. claim_type must always be AUTHOR_CLAIM. Never create SYSTEM_CONCLUSION.
+3. Every claim must include at least one short, verbatim quote from the supplied full text.
+4. Evidence source_text must be copied exactly, including punctuation and capitalization.
+5. Do not provide page numbers or offsets; the system derives them from the local PDF.
+6. Link non-null Research Card fields to verbatim evidence where possible.
+7. Do not invent support. A claim without a locally verifiable quote will be discarded.
+8. Do not use outside knowledge or convert an author statement into an established fact.
+

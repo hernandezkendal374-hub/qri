@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 from sqlalchemy import exists, or_, select
 
+from app.claims.service import ClaimEvidenceExtractor
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
@@ -13,7 +14,7 @@ from app.discovery.service import DiscoveryService
 from app.extraction.research_card import ResearchCardExtractor
 from app.fulltext.downloader import PDFDownloader
 from app.fulltext.service import FullTextService
-from app.models import Document, Paper, PipelineRun, ResearchCard
+from app.models import Claim, Document, Paper, PipelineRun, ResearchCard
 from app.models.entities import FullTextStatus
 from app.parsing.pymupdf_parser import PyMuPDFParser
 from app.providers.llm.openai_compatible import OpenAICompatibleProvider
@@ -194,6 +195,66 @@ def analyze(top: int = typer.Option(3, min=1, max=20)) -> None:
             pipeline.research_card_count = successes
             session.commit()
             typer.echo(f"Research Cards: {successes}/{len(rows)}")
+
+    asyncio.run(run())
+
+
+@app.command()
+def claims(top: int = typer.Option(3, min=1, max=20)) -> None:
+    """Extract AUTHOR_CLAIM records with locally verified Evidence Pointers."""
+    settings = get_settings()
+    if not settings.llm_base_url or not settings.llm_api_key:
+        typer.echo(
+            "LLM is not configured. Set LLM_BASE_URL and LLM_API_KEY in .env. "
+            "No fixture claims were written to the research database.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    provider = OpenAICompatibleProvider(
+        settings.llm_base_url,
+        settings.llm_api_key.get_secret_value(),
+        timeout=max(settings.http_timeout_seconds, 60.0),
+    )
+
+    async def run() -> None:
+        with SessionLocal() as session:
+            rows = session.execute(
+                select(Paper, Document, ResearchCard)
+                .join(Document, Document.paper_id == Paper.id)
+                .join(ResearchCard, ResearchCard.paper_id == Paper.id)
+                .where(
+                    Document.document_type == "PDF",
+                    ~exists(select(Claim.id).where(Claim.paper_id == Paper.id)),
+                )
+                .order_by(Paper.id)
+                .limit(top)
+            ).all()
+            pipeline = PipelineRun(query=f"[CLAIM_EVIDENCE] top={top}")
+            session.add(pipeline)
+            session.commit()
+            extractor = ClaimEvidenceExtractor(
+                session, provider, PyMuPDFParser(), settings.primary_model
+            )
+            claim_count = 0
+            errors = 0
+            for paper, document, card in rows:
+                try:
+                    result = await extractor.extract(paper, document, card, pipeline.run_id)
+                    claim_count += result.claims_created
+                    typer.echo(
+                        f"OK {paper.id}: {result.claims_created} claims, "
+                        f"{result.evidence_created} evidence pointers, "
+                        f"{result.rejected_quotes} rejected quotes"
+                    )
+                except Exception as exc:
+                    errors += 1
+                    typer.echo(f"ERROR {paper.id}: {type(exc).__name__}: {exc}", err=True)
+            pipeline.ended_at = datetime.now(UTC).replace(tzinfo=None)
+            pipeline.ai_call_count = len(rows)
+            pipeline.error_count = errors
+            pipeline.claim_count = claim_count
+            session.commit()
+            typer.echo(f"Claims created: {claim_count} from {len(rows)} papers")
 
     asyncio.run(run())
 
