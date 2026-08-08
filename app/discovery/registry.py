@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.deduplication import normalize_doi, normalize_title
 from app.deduplication.service import PaperGroup
-from app.models import Paper, PaperSource
+from app.models import Document, Paper, PaperSource
 from app.models.entities import FullTextStatus
 
 
@@ -49,6 +49,16 @@ class PaperRegistry:
             )
             self.session.add(paper)
             self.session.flush()
+            if record.abstract:
+                self.session.add(
+                    Document(
+                        paper_id=paper.id,
+                        document_type="ABSTRACT",
+                        content_hash=hashlib.sha256(record.abstract.encode()).hexdigest(),
+                        parser_version="metadata-v1",
+                        parsed_text=record.abstract,
+                    )
+                )
         existing = {(source.provider, source.provider_id) for source in paper.sources}
         for source in group.records:
             if (source.provider, source.provider_id) not in existing:

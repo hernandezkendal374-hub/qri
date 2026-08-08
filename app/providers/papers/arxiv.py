@@ -13,10 +13,12 @@ class ArxivProvider(HTTPPaperProvider, PaperProvider):
     endpoint = "https://export.arxiv.org/api/query"
 
     async def search(self, query: str, *, limit: int = 20) -> list[ProviderPaper]:
+        terms = [term for term in re.findall(r"[A-Za-z0-9-]+", query) if len(term) > 1]
+        search_query = " AND ".join(f"all:{term}" for term in terms)
         response = await self.request(
             self.endpoint,
             params={
-                "search_query": f'all:"{query}"',
+                "search_query": search_query,
                 "start": 0,
                 "max_results": min(limit, 100),
                 "sortBy": "relevance",
