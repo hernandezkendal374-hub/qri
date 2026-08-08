@@ -1,0 +1,1 @@
+"""QRI application package."""

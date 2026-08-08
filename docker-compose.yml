@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: qri
+      POSTGRES_USER: qri
+      POSTGRES_PASSWORD: qri
+    ports:
+      - "5432:5432"
+    volumes:
+      - qri_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qri"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  qri_postgres:
+
