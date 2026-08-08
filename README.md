@@ -26,6 +26,7 @@ PostgreSQL 是目标数据库；本地测试可使用 SQLite。若已安装 Dock
 alembic upgrade head
 qri search "momentum anomaly US equities"
 qri fetch --top 3
+qri analyze --top 3
 ```
 
 搜索会并发调用 Semantic Scholar、OpenAlex、Crossref 和 arXiv。单个来源限流或超时只产生告警，不阻断其他来源；原始来源记录会完整保存在 `paper_sources`，规范论文保存在 `papers`。
@@ -35,12 +36,15 @@ qri fetch --top 3
 - M0：项目骨架、配置、安全日志、SQLAlchemy 核心模型、LLM/Paper Provider 抽象。
 - M1：Semantic Scholar、OpenAlex、Crossref、arXiv 搜索，聚合去重，Paper Registry，真实搜索 CLI。
 - M2：Unpaywall、开放访问 PDF 获取、PDF 内容校验、PyMuPDF 解析和全文状态闭环。
-- M3–M7：结构化提取、Evidence/Claims、多论文推理、端到端 CLI、极简 Web UI。
+- M3：配置化 OpenAI-compatible LLM、严格 Research Card Schema、提示词版本和 AI 调用审计。
+- M4–M7：Evidence/Claims、多论文推理、端到端 CLI、极简 Web UI。
 
-当前状态：M0、M1、M2 已完成。
+当前状态：M0、M1、M2、M3 已完成。
 
 M1 验收查询 `momentum anomaly US equities` 的实测结果：发现 40 条、去重后 38 篇、25 篇含摘要。Semantic Scholar 在无 API Key 情况下返回 429，但降级隔离生效，其余公开来源正常给出真实论文列表。全文获取属于 M2，因此当前 `With full text` 为 0 是预期结果。
 
 自动测试覆盖：配置与密钥安全、核心表、严格 Schema 缺失字段、DOI/标题规范化、模糊去重、API 重试、API 超时、单来源故障隔离。
 
 M2 实测从真实候选中成功解析 3 篇全文：26、56、37 页，共 287,297 个字符。每份 PDF 都验证 `%PDF-` 文件签名并限制为 50 MB；解析文本保留页码和字符偏移，为 Evidence Pointer 提供基础。全文尝试失败记为 `FULLTEXT_UNAVAILABLE`，已有摘要仍以 `ABSTRACT` 文档保存，模型不得据此声称读过全文。
+
+M3 的默认主模型是 `claude-sonnet-4-6`，通过 `LLM_BASE_URL` 与 `LLM_API_KEY` 接入 OpenAI-compatible API。每次调用保存 requested/returned model、提示词版本、token、延迟、响应哈希和状态。模型输出必须通过 `ResearchCardExtraction` 严格校验，不能确认的字段必须为 `null`。当前本机未配置这两个环境变量，因此自动测试使用隔离的确定性夹具，真实数据库不会写入模拟 Research Card。

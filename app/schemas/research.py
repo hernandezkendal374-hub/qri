@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PaperResearchCard(BaseModel):
@@ -26,6 +26,13 @@ class PaperResearchCard(BaseModel):
     lookahead_handling: str | None = None
     in_sample: str | None = None
     out_of_sample: str | None = None
-    robustness_tests: list[str] = []
-    required_data: list[str] = []
-    limitations: list[str] = []
+    robustness_tests: list[str] = Field(default_factory=list)
+    required_data: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+
+class ResearchCardExtraction(BaseModel):
+    """The only accepted model output for M3."""
+
+    model_config = ConfigDict(extra="forbid")
+    card: PaperResearchCard

@@ -1,0 +1,30 @@
+{
+  "card": {
+    "market": "United States",
+    "asset_class": "Equities",
+    "universe": null,
+    "sample_start": "1963",
+    "sample_end": "1999",
+    "hypothesis": "The author tests whether benchmarked delegated management limits arbitrage.",
+    "mechanism": "Benchmarking creates institutional demand for high-beta assets.",
+    "counter_mechanism": null,
+    "signal_definition": null,
+    "formation_period": null,
+    "holding_period": null,
+    "rebalance_frequency": null,
+    "portfolio_construction": null,
+    "benchmark": null,
+    "reported_return": null,
+    "reported_alpha": null,
+    "reported_sharpe": null,
+    "reported_max_drawdown": null,
+    "transaction_cost_handling": null,
+    "survivorship_handling": null,
+    "lookahead_handling": null,
+    "in_sample": null,
+    "out_of_sample": null,
+    "robustness_tests": [],
+    "required_data": ["CRSP stock returns"],
+    "limitations": []
+  }
+}
