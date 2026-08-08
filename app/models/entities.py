@@ -160,6 +160,29 @@ class Evidence(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class PaperComparison(Base):
+    __tablename__ = "paper_comparisons"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    comparison_uid: Mapped[str] = mapped_column(
+        String(64), unique=True, default=lambda: f"CMP-{uuid.uuid4().hex}"
+    )
+    paper_ids_json: Mapped[list[int]] = mapped_column(JSON)
+    common_findings_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    differences_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    contradictions_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    sample_differences_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    universe_differences_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    signal_differences_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    cost_assumption_differences_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    oos_differences_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    survivorship_differences_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    possible_explanations_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    research_gap: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class ResearchQuestion(Base):
     __tablename__ = "research_questions"
     id: Mapped[int] = mapped_column(primary_key=True)

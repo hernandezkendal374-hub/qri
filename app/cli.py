@@ -6,6 +6,7 @@ import typer
 from sqlalchemy import exists, or_, select
 
 from app.claims.service import ClaimEvidenceExtractor
+from app.comparison.service import MultiPaperComparisonService
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
@@ -23,6 +24,7 @@ from app.providers.papers.crossref import CrossrefProvider
 from app.providers.papers.openalex import OpenAlexProvider
 from app.providers.papers.semantic_scholar import SemanticScholarProvider
 from app.providers.papers.unpaywall import UnpaywallProvider
+from app.question_factory.service import CandidateQuestionService
 
 app = typer.Typer(help="QRI literature intelligence CLI")
 
@@ -255,6 +257,59 @@ def claims(top: int = typer.Option(3, min=1, max=20)) -> None:
             pipeline.claim_count = claim_count
             session.commit()
             typer.echo(f"Claims created: {claim_count} from {len(rows)} papers")
+
+    asyncio.run(run())
+
+
+@app.command()
+def questions() -> None:
+    """Compare three claimed papers and generate Candidate Research Questions."""
+    settings = get_settings()
+    if not settings.llm_base_url or not settings.llm_api_key:
+        typer.echo(
+            "LLM is not configured. Set LLM_BASE_URL and LLM_API_KEY in .env. "
+            "No fixture comparisons or questions were written.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    provider = OpenAICompatibleProvider(
+        settings.llm_base_url,
+        settings.llm_api_key.get_secret_value(),
+        timeout=max(settings.http_timeout_seconds, 60.0),
+    )
+
+    async def run() -> None:
+        Base.metadata.create_all(engine)
+        with SessionLocal() as session:
+            paper_ids = list(
+                session.scalars(select(Claim.paper_id).distinct().order_by(Claim.paper_id).limit(3))
+            )
+            if len(paper_ids) != 3:
+                typer.echo(
+                    f"Exactly 3 papers with Claims are required; found {len(paper_ids)}.",
+                    err=True,
+                )
+                raise typer.Exit(code=2)
+            papers = list(session.scalars(select(Paper).where(Paper.id.in_(paper_ids))))
+            source_claims = list(
+                session.scalars(select(Claim).where(Claim.paper_id.in_(paper_ids)))
+            )
+            pipeline = PipelineRun(query="[QUESTIONS] three-paper comparison")
+            session.add(pipeline)
+            session.commit()
+            comparison = await MultiPaperComparisonService(
+                session, provider, settings.reasoning_model
+            ).compare(papers, source_claims, pipeline.run_id)
+            generated = await CandidateQuestionService(
+                session, provider, settings.reasoning_model
+            ).generate(comparison, source_claims, pipeline.run_id)
+            pipeline.ended_at = datetime.now(UTC).replace(tzinfo=None)
+            pipeline.ai_call_count = 2
+            pipeline.question_count = len(generated)
+            session.commit()
+            typer.echo(f"Comparison: {comparison.comparison_uid}")
+            for question in generated:
+                typer.echo(f"{question.question_uid} [{question.status.value}] {question.question}")
 
     asyncio.run(run())
 

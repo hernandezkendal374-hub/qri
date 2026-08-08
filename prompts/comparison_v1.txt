@@ -1,0 +1,9 @@
+Compare exactly three papers using only the supplied AUTHOR_CLAIM records.
+
+Return the strict JSON schema. Cover common findings, differences, contradictions,
+sample, universe, signal, transaction-cost assumptions, out-of-sample design,
+survivorship handling, and possible explanations. Empty lists are allowed when the
+claims provide no evidence for a category. Every non-empty comparison item must cite
+one or more supplied Claim IDs. Never invent a Claim ID, use outside knowledge, or
+turn an author claim into a SYSTEM_CONCLUSION.
+

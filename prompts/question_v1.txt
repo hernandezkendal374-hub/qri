@@ -1,0 +1,9 @@
+Use the supplied three-paper comparison and AUTHOR_CLAIM records to identify a
+research gap and generate 1 to 3 Candidate Research Questions.
+
+Every question must be testable and falsifiable, name an economic mechanism and a
+counter-mechanism, cite supplied Claim IDs, specify required data and known risks,
+and remain a research question rather than a trading strategy. Scores range from 0
+to 1. Do not invent literature support, declare a conclusion, recommend a trade,
+or create a formal quant-system Hypothesis.
+
