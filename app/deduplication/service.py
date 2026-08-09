@@ -48,14 +48,12 @@ def _same_work(a: ProviderPaper, b: ProviderPaper) -> bool:
     left, right = normalize_title(a.title), normalize_title(b.title)
     if left == right:
         return True
-    years_match = (
-        not a.publication_date
-        or not b.publication_date
-        or abs(a.publication_date.year - b.publication_date.year) <= 1
-    )
     left_author = _first_author(a)
     right_author = _first_author(b)
-    authors_match = not left_author or not right_author or left_author == right_author
+    if not a.publication_date or not b.publication_date or not left_author or not right_author:
+        return False
+    years_match = abs(a.publication_date.year - b.publication_date.year) <= 1
+    authors_match = left_author == right_author
     return years_match and authors_match and SequenceMatcher(None, left, right).ratio() >= 0.90
 
 

@@ -18,6 +18,7 @@ from app.fulltext.service import FullTextService
 from app.models import Claim, Document, Paper, PipelineRun, ResearchCard
 from app.models.entities import FullTextStatus
 from app.parsing.pymupdf_parser import PyMuPDFParser
+from app.pipeline.orchestrator import PipelineOrchestrator
 from app.providers.llm.openai_compatible import OpenAICompatibleProvider
 from app.providers.papers.arxiv import ArxivProvider
 from app.providers.papers.crossref import CrossrefProvider
@@ -310,6 +311,80 @@ def questions() -> None:
             typer.echo(f"Comparison: {comparison.comparison_uid}")
             for question in generated:
                 typer.echo(f"{question.question_uid} [{question.status.value}] {question.question}")
+
+    asyncio.run(run())
+
+
+@app.command("pipeline")
+def pipeline_command(
+    query: str,
+    top: int = typer.Option(3, min=3, max=3),
+    resume: str | None = typer.Option(None, help="Resume an existing run_id"),
+) -> None:
+    """Run the complete resumable QRI POC pipeline."""
+    settings = get_settings()
+    if not settings.llm_base_url or not settings.llm_api_key:
+        typer.echo(
+            "LLM is not configured. Set LLM_BASE_URL and LLM_API_KEY in .env. "
+            "The end-to-end pipeline was not started.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    key = settings.semantic_scholar_api_key
+    common = {
+        "timeout": settings.http_timeout_seconds,
+        "max_retries": settings.http_max_retries,
+    }
+    paper_providers = [
+        SemanticScholarProvider(
+            api_key=key.get_secret_value() if key else None,
+            timeout=common["timeout"],
+            max_retries=int(common["max_retries"]),
+        ),
+        OpenAlexProvider(timeout=common["timeout"], max_retries=int(common["max_retries"])),
+        CrossrefProvider(timeout=common["timeout"], max_retries=int(common["max_retries"])),
+        ArxivProvider(timeout=common["timeout"], max_retries=int(common["max_retries"])),
+    ]
+    llm = OpenAICompatibleProvider(
+        settings.llm_base_url,
+        settings.llm_api_key.get_secret_value(),
+        timeout=max(settings.http_timeout_seconds, 60.0),
+    )
+
+    async def run() -> None:
+        Base.metadata.create_all(engine)
+        with SessionLocal() as session:
+            orchestrator = PipelineOrchestrator(
+                session=session,
+                paper_providers=paper_providers,
+                llm_provider=llm,
+                downloader=PDFDownloader(timeout=max(settings.http_timeout_seconds, 45.0)),
+                parser=PyMuPDFParser(),
+                unpaywall=UnpaywallProvider(
+                    settings.unpaywall_email,
+                    timeout=settings.http_timeout_seconds,
+                    max_retries=settings.http_max_retries,
+                ),
+                storage_dir=Path("data/pdfs"),
+                primary_model=settings.primary_model,
+                reasoning_model=settings.reasoning_model,
+            )
+            try:
+                outcome = await orchestrator.run(query, top=top, resume_run_id=resume)
+            except Exception as exc:
+                failed = session.scalar(
+                    select(PipelineRun)
+                    .where(PipelineRun.query == query)
+                    .order_by(PipelineRun.id.desc())
+                )
+                if failed:
+                    typer.echo(
+                        f"Pipeline {failed.run_id} failed at {failed.current_stage}: {exc}",
+                        err=True,
+                    )
+                raise typer.Exit(code=1) from exc
+            typer.echo(f"Pipeline {outcome.run_id}: {outcome.status}")
+            typer.echo(f"Question IDs: {outcome.question_ids}")
 
     asyncio.run(run())
 

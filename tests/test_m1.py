@@ -26,7 +26,11 @@ def test_title_normalization() -> None:
 
 def test_deduplication_priority_and_fuzzy_title() -> None:
     first = paper(
-        provider="arxiv", provider_id="a", arxiv_id="1234", publication_date=date(2020, 1, 1)
+        provider="arxiv",
+        provider_id="a",
+        arxiv_id="1234",
+        authors=[{"name": "Jane Smith"}],
+        publication_date=date(2020, 1, 1),
     )
     second = paper(
         provider="crossref",
@@ -34,6 +38,7 @@ def test_deduplication_priority_and_fuzzy_title() -> None:
         title="Momentum and Returns",
         doi="10.1/x",
         abstract="Evidence",
+        authors=[{"family": "Smith"}],
         publication_date=date(2021, 1, 1),
     )
     groups = deduplicate([first, second])
