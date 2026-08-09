@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Research Questions{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">Human Review Queue</p><h1>Research Questions</h1></div><p class="lede">可验证、可证伪，但尚未成为正式 Hypothesis。</p></section>
+{% for question in questions %}
+<article class="question-card">
+  <div class="question-top"><span class="question-id">{{ question.question_uid }}</span><span class="status {{ question.status.value|lower }}">{{ question.status.value }}</span></div>
+  <p class="question-text">{{ question.question }}</p>
+  <div class="mechanism-grid"><div><small>Economic mechanism</small><p>{{ question.economic_mechanism }}</p></div><div><small>Counter mechanism</small><p>{{ question.counter_mechanism }}</p></div></div>
+  <div class="score-row"><span>Novelty <strong>{{ '%.2f'|format(question.novelty_score or 0) }}</strong></span><span>Testability <strong>{{ '%.2f'|format(question.testability_score or 0) }}</strong></span><span>Data <strong>{{ '%.2f'|format(question.data_availability_score or 0) }}</strong></span><span>Priority <strong>{{ '%.2f'|format(question.research_priority_score or 0) }}</strong></span></div>
+  <details><summary>Literature & requirements</summary><div class="detail-grid"><div><small>Supporting Claim IDs</small><p>{{ question.supporting_claims_json }}</p></div><div><small>Contradicting Claim IDs</small><p>{{ question.contradicting_claims_json }}</p></div><div><small>Required data</small><p>{{ question.required_data_json }}</p></div><div><small>Known risks</small><p>{{ question.known_risks_json }}</p></div></div></details>
+</article>
+{% else %}<div class="empty"><h2>尚无 Candidate Research Questions</h2><p>需要三篇具备 Claims 的论文后运行 <code>qri questions</code>。</p></div>{% endfor %}
+{% endblock %}
+

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ paper.title }}{% endblock %}
+{% block content %}
+<a class="back" href="/papers">← 返回 Papers</a>
+<section class="paper-hero">
+  <p class="eyebrow">Paper {{ paper.paper_uid }}</p>
+  <h1>{{ paper.title }}</h1>
+  <div class="meta-row">
+    <span>{{ paper.publication_date or '日期未知' }}</span><span>{{ paper.venue or 'Venue 未知' }}</span><span>{{ paper.doi or paper.arxiv_id or '无外部标识' }}</span>
+  </div>
+  {% if paper.abstract %}<p class="abstract">{{ paper.abstract }}</p>{% endif %}
+</section>
+
+<section><div class="section-title"><h2>Documents</h2><span>{{ documents|length }}</span></div>
+  <div class="compact-grid">
+  {% for document in documents %}<article class="mini-card"><strong>{{ document.document_type }}</strong><span>{{ document.parser_version or '未解析' }}</span><small>{{ document.content_hash[:12] if document.content_hash else 'no hash' }}</small></article>
+  {% else %}<p class="muted">没有已保存文档。</p>{% endfor %}
+  </div>
+</section>
+
+<section><div class="section-title"><h2>Research Card</h2><span>{{ card.model if card else '未生成' }}</span></div>
+{% if card %}
+  <div class="field-grid">
+  {% for field in card_fields %}
+    <article class="field-card">
+      <div class="field-head"><code>{{ field.name }}</code><span class="verification {{ field.status|lower }}">{{ field.status }}</span></div>
+      <div class="field-value">{% if field.value is not none and field.value != [] %}{{ field.value }}{% else %}<span class="null">null</span>{% endif %}</div>
+      {% for pointer in evidence_by_field.get(field.name, []) %}<a href="#evidence-{{ pointer.id }}">Evidence #{{ pointer.id }} · p.{{ pointer.page_number or '?' }}</a>{% endfor %}
+    </article>
+  {% endfor %}
+  </div>
+{% else %}<div class="empty compact"><p>尚未生成 Research Card。只有完整 PDF 才能进入分析。</p></div>{% endif %}
+</section>
+
+<section><div class="section-title"><h2>Author Claims</h2><span>{{ claims|length }}</span></div>
+{% for claim in claims %}
+  <article class="claim-card"><div class="claim-id">CLAIM #{{ claim.id }} · {{ claim.claim_type }}</div><p>{{ claim.claim_text }}</p>
+  <div class="evidence-links">{% for pointer in evidence_by_claim.get(claim.id, []) %}<a href="#evidence-{{ pointer.id }}">查看 Evidence #{{ pointer.id }} · p.{{ pointer.page_number or '?' }}</a>{% else %}<span class="danger">UNVERIFIED · 无 Evidence</span>{% endfor %}</div></article>
+{% else %}<div class="empty compact"><p>尚无 Claims。</p></div>{% endfor %}
+</section>
+
+<section><div class="section-title"><h2>Evidence Pointers</h2><span>{{ pointers|length }}</span></div>
+{% for pointer in pointers %}
+  <article id="evidence-{{ pointer.id }}" class="evidence-card {% if selected_evidence == pointer.id %}selected{% endif %}">
+    <div class="evidence-meta"><strong>Evidence #{{ pointer.id }}</strong><span>Page {{ pointer.page_number or '?' }}</span><span>{{ pointer.section or 'Section 未标注' }}</span><span>Paragraph {{ pointer.paragraph_index if pointer.paragraph_index is not none else '?' }}</span><span>Offset {{ pointer.start_offset or 0 }}–{{ pointer.end_offset or 0 }}</span></div>
+    <blockquote>{{ pointer.source_text }}</blockquote>
+  </article>
+{% else %}<div class="empty compact"><p>没有可回指的原文证据。</p></div>{% endfor %}
+</section>
+{% endblock %}
+

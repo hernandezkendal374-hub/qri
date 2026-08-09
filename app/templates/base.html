@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}QRI{% endblock %} · Quant Research Intelligence</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/papers" aria-label="QRI 首页">
+      <span class="brand-mark">Q</span>
+      <span><strong>QRI</strong><small>Quant Research Intelligence</small></span>
+    </a>
+    <nav aria-label="主导航">
+      <a href="/papers" class="{% if active == 'papers' %}active{% endif %}">Papers</a>
+      <a href="/claims" class="{% if active == 'claims' %}active{% endif %}">Claims</a>
+      <a href="/questions" class="{% if active == 'questions' %}active{% endif %}">Research Questions</a>
+    </nav>
+  </header>
+  <main class="page-shell">
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Evidence &gt; Summary · Question &gt; Conclusion · Human Approval &gt; Automation</footer>
+</body>
+</html>
+

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Claims{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">Author Statements</p><h1>Claims</h1></div><p class="lede">论文作者主张，不等同于系统事实。</p></section>
+{% for claim, paper in rows %}
+<article class="claim-card global"><div class="claim-id">CLAIM #{{ claim.id }} · {{ claim.claim_type }}</div><h2><a href="/papers/{{ paper.id }}">{{ paper.title }}</a></h2><p>{{ claim.claim_text }}</p>
+<div class="evidence-links">{% for pointer in evidence_by_claim.get(claim.id, []) %}<a href="/papers/{{ paper.id }}?evidence={{ pointer.id }}#evidence-{{ pointer.id }}">Evidence #{{ pointer.id }} · Page {{ pointer.page_number or '?' }}</a>{% else %}<span class="danger">UNVERIFIED · 无 Evidence</span>{% endfor %}</div></article>
+{% else %}<div class="empty"><h2>尚无 Claims</h2><p>配置 LLM 后运行 <code>qri claims --top 3</code>。</p></div>{% endfor %}
+{% endblock %}
+

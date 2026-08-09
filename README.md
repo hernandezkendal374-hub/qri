@@ -32,6 +32,7 @@ qri questions
 qri pipeline "momentum anomaly US equities"
 # 失败后使用日志中的 run_id 恢复：
 qri pipeline "momentum anomaly US equities" --resume <run_id>
+uvicorn app.main:app --reload
 ```
 
 搜索会并发调用 Semantic Scholar、OpenAlex、Crossref 和 arXiv。单个来源限流或超时只产生告警，不阻断其他来源；原始来源记录会完整保存在 `paper_sources`，规范论文保存在 `papers`。
@@ -45,9 +46,9 @@ qri pipeline "momentum anomaly US equities" --resume <run_id>
 - M4：`AUTHOR_CLAIM`、逐字 Evidence Pointer、本地页码/偏移验证、字段验证状态。
 - M5：三论文比较、冲突与 Research Gap 分析、Candidate Research Question。
 - M6：可恢复、可审计、阶段幂等的端到端 CLI Pipeline。
-- M7：极简 Web UI。
+- M7：Papers、Paper Detail、Claims、Research Questions 极简 Web UI。
 
-当前状态：M0、M1、M2、M3、M4、M5、M6 已完成。
+当前状态：M0–M7 已完成，QRI V0.1 End-to-End POC 已交付。
 
 M1 验收查询 `momentum anomaly US equities` 的实测结果：发现 40 条、去重后 38 篇、25 篇含摘要。Semantic Scholar 在无 API Key 情况下返回 429，但降级隔离生效，其余公开来源正常给出真实论文列表。全文获取属于 M2，因此当前 `With full text` 为 0 是预期结果。
 
@@ -62,3 +63,5 @@ M4 要求模型只提交逐字原文摘录，页码、段落索引和字符偏�
 M5 只对恰好 3 篇已有 Claims 的高价值论文调用 `REASONING_MODEL`（默认 `gpt-5.4`），分别进行一次多论文比较和一次最终问题生成。所有比较项与问题的文献支持必须引用输入集合中的 Claim ID；未知 ID 会使整次结果回滚。问题数量限制为 1–3，必须包含机制、反机制、数据需求、已知风险和四项评分，初始状态固定为 `HUMAN_REVIEW_REQUIRED`。只有人工改为 `HUMAN_APPROVED` 后 `export_candidate_question()` 才能输出标准 JSON，输出后状态变为 `EXPORTED`。隔离验收使用 3 篇真实全文输入，生成 1 条比较、1 个 Candidate Question 和 2 条推理模型审计；真实数据库仍未写入模拟研究结果。
 
 M6 将五个阶段串为一个 `qri pipeline` 命令。`pipeline_stage_runs` 为每个阶段保存状态、尝试次数、开始/结束时间、指标、错误和 JSON 检查点；使用 `--resume <run_id>` 时已成功阶段直接跳过。隔离恢复验收主动让第一次 Research Card 调用失败，随后从同一 run_id 恢复：SEARCH/FULLTEXT 均未重跑，最终得到 3 Papers、3 PDFs、3 Research Cards、3 Claims、6 Evidence Pointers、1 Comparison 和 1 Candidate Question。再次恢复已完成任务不会重复创建 Question。M6 同时收紧模糊去重：只有标题、作者和发表年份都可用并匹配时才允许 fuzzy merge。
+
+M7 提供四个只读页面：Papers、Paper Detail、Claims、Research Questions。Paper Detail 同时展示 Metadata、Documents、Research Card、Claims 和 Evidence；从 Research Card 字段或 Claim 点击 Evidence 会回到同页对应的原文摘录，显示页码、章节、段落索引和字符偏移。页面不提供策略、回测、交易或自动审批入口。启动后访问 `http://127.0.0.1:8000/papers`。
