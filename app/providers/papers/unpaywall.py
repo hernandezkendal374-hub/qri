@@ -21,18 +21,33 @@ class UnpaywallProvider(HTTPPaperProvider):
         self.email = email
 
     async def lookup(self, doi: str) -> OpenAccessLocation | None:
+        locations = await self.lookup_all(doi)
+        return locations[0] if locations else None
+
+    async def lookup_all(self, doi: str) -> list[OpenAccessLocation]:
         if not self.email:
-            return None
+            return []
         data = await self.request_json(f"{self.endpoint}/{doi}", params={"email": self.email})
         if not data.get("is_oa"):
-            return None
-        location = data.get("best_oa_location") or {}
-        url = location.get("url_for_pdf")
-        if not url:
-            return None
-        return OpenAccessLocation(
-            url=url,
-            license=location.get("license"),
-            version=location.get("version"),
-            host_type=location.get("host_type"),
-        )
+            return []
+        raw_locations = list(data.get("oa_locations") or [])
+        best = data.get("best_oa_location")
+        if best:
+            raw_locations.insert(0, best)
+        raw_locations.sort(key=lambda item: item.get("host_type") != "repository")
+        results: list[OpenAccessLocation] = []
+        seen: set[str] = set()
+        for location in raw_locations:
+            url = location.get("url_for_pdf")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            results.append(
+                OpenAccessLocation(
+                    url=url,
+                    license=location.get("license"),
+                    version=location.get("version"),
+                    host_type=location.get("host_type"),
+                )
+            )
+        return results

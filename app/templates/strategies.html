@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}历史策略数据归档{% endblock %}
+{% block content %}
+<a class="back" href="/questions">← 返回研究问题</a>
+<section class="page-heading"><div><p class="eyebrow">旧版只读数据</p><h1>历史策略与回测归档</h1></div><p class="lede">这些记录由旧版 QRI 生成，已退出当前产品主链，不再执行、重构或参与研究排名。</p></section>
+<div class="boundary-banner"><strong>只读归档</strong><span>保留用于审计和迁移；不代表研究问题成立，也不代表策略可交易。</span></div>
+{% for incubation, question, translation in rows %}
+<article class="strategy-page-card archived-question"><div class="strategy-page-head"><div><span class="question-id">{{ question.question_uid }}</span><h2>{{ question.plain_language_question or (translation.question_zh if translation else question.question) }}</h2></div><span class="status">历史记录</span></div><p class="muted">模型 {{ incubation.model }} · 版本 {{ incubation.prompt_version }} · 创建于 {{ incubation.created_at|local_datetime }}</p><a class="secondary-button" href="/questions/{{ question.id }}/strategy-spec.json">下载旧版 JSON</a></article>
+{% else %}<div class="empty"><h2>没有旧版策略数据</h2></div>{% endfor %}
+{% endblock %}

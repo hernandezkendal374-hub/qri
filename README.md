@@ -1,67 +1,118 @@
 # QRI — Quant Research Intelligence
 
-量化论文情报与研究问题生成系统。QRI 发现、聚合、解析与比较学术论文，最终只生成需要人工审查的 Candidate Research Question。它不连接现有量化系统，不回测、不交易，也不把作者结论当作事实。
+量化论文情报与研究问题生成系统。QRI 用于发现、聚合和核验研究证据，把论文中的主张转成需要人工审核的研究问题与验证方案。
+
+QRI 的职责是回答：
+
+- 什么问题值得研究？
+- 它为什么可能成立，又为什么可能不成立？
+- 应该如何证伪，最容易在哪些地方得出假结论？
+
+QRI 不负责生成可交易策略，不决定仓位、敞口或执行方式，也不把统计检验包装成投资建议。
+
+## 产品主链
+
+```text
+研究来源
+  → Claim / Evidence
+  → Candidate Research Question
+  → Research Validation Spec
+  → 人工审核
+  → Export
+```
+
+每个候选问题同时保存：
+
+- 普通人能看懂的一句话版本
+- 可供研究系统使用的学术定义版本
+
+Research Validation Spec 只描述研究对象、经济机制、反向机制、变量、样本、PIT 要求、统计检验、样本外设计、反证条件、数据需求和偏差风险。交易成本、借券和容量只能作为现实敏感性提醒，不能被写成交易规则。
 
 ## 不可突破的边界
 
-- Evidence > Summary：重要字段没有原文证据即为 `UNVERIFIED`。
-- Question > Conclusion：第一阶段只保存 `AUTHOR_CLAIM`，禁止自动生成 `SYSTEM_CONCLUSION`。
-- Human Approval > Automation：只有 `HUMAN_APPROVED` 的问题才允许导出。
-- QRI 数据库与现有美股量化研究系统严格隔离。
+- **Evidence > Summary**：重要字段没有原文证据即为 `UNVERIFIED`。
+- **Question > Conclusion**：作者主张不是系统结论。
+- **Falsification First**：验证方案必须明确可能推翻假设的结果。
+- **Human Approval > Automation**：验证方案通过人工审核后才允许导出。
+- **Statistical Test ≠ Strategy**：回归、组合排序、安慰剂和样本外检验是研究工具，不是交易策略。
+- QRI 数据库与下游美股量化系统保持隔离。
 
-## 本地开发
+旧版策略孵化和快速回测记录不会被删除，但只作为隐藏的只读归档保留，不参与排名、审核或导出。
 
-需要 Python 3.12+。复制 `.env.example` 为 `.env`，按需填入密钥；任何密钥都不能写入代码、README 或日志。
+## 每日最值得研究
+
+每日排名不读取策略收益或回测指标，只依据：
+
+- 新颖度
+- 证据质量
+- 证据冲突度
+- 可证伪性
+- 可检验性
+- 数据可得性
+
+系统每日 08:00 自动执行论文筛选任务，也可以在运行概览中手动启动。研究问题按生成日期归档。
+
+## 论文来源
+
+当前论文发现层聚合 arXiv、OpenAlex、Crossref 和 Semantic Scholar，并使用 Unpaywall 补充合法开放全文。单一来源限流或失败不会阻断其他来源；原始来源记录保存在 `paper_sources`，规范化论文保存在 `papers`。
+
+QRI 只分析合法获得的全文。仅有摘要时会明确标为 `ABSTRACT_ONLY`，不会声称已经读取全文。
+
+## 本地运行
+
+需要 Python 3.12+。复制 `.env.example` 为 `.env`，配置数据库和 OpenAI-compatible 模型接口。密钥不得写入代码、README 或日志。
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest
-```
-
-PostgreSQL 是目标数据库；本地测试可使用 SQLite。若已安装 Docker，可执行 `docker compose up -d` 后运行迁移。
-
-```powershell
 alembic upgrade head
-qri search "momentum anomaly US equities"
-qri fetch --top 3
-qri analyze --top 3
-qri claims --top 3
-qri questions
-qri pipeline "momentum anomaly US equities"
-# 失败后使用日志中的 run_id 恢复：
-qri pipeline "momentum anomaly US equities" --resume <run_id>
 uvicorn app.main:app --reload
 ```
 
-搜索会并发调用 Semantic Scholar、OpenAlex、Crossref 和 arXiv。单个来源限流或超时只产生告警，不阻断其他来源；原始来源记录会完整保存在 `paper_sources`，规范论文保存在 `papers`。
+访问：
+
+- `http://127.0.0.1:8000/dashboard`：运行概览与每日最值得研究
+- `http://127.0.0.1:8000/papers`：论文库
+- `http://127.0.0.1:8000/claims`：作者主张与原文证据
+- `http://127.0.0.1:8000/questions`：候选问题、验证方案、审核与导出
+- `http://127.0.0.1:8000/daily-best`：每日研究档案
+
+## 模型配置
+
+```env
+PRIMARY_MODEL=claude-sonnet-4-6
+REASONING_MODEL=claude-sonnet-4-6
+VALIDATION_MODEL=claude-sonnet-4-6
+```
+
+- `PRIMARY_MODEL`：论文日常分析
+- `REASONING_MODEL`：研究问题生成
+- `VALIDATION_MODEL`：Research Validation Spec 生成
+
+`STRATEGY_MODEL` 仅为旧版只读数据兼容保留，不再进入主流程。
+
+## 数据库升级
+
+```powershell
+alembic upgrade head
+```
+
+迁移 `0010` 为研究问题增加双版本文本，并创建 `research_validation_specs`。已有研究问题会安全回填；旧策略与回测表不会删除。
+
+## 测试与质量检查
+
+```powershell
+pytest -q
+ruff check .
+```
+
+测试覆盖论文聚合、全文状态、证据定位、问题生成、范围约束、可恢复漏斗、双版本问题、验证方案持久化和 AI 调用审计。
 
 ## 里程碑
 
-- M0：项目骨架、配置、安全日志、SQLAlchemy 核心模型、LLM/Paper Provider 抽象。
-- M1：Semantic Scholar、OpenAlex、Crossref、arXiv 搜索，聚合去重，Paper Registry，真实搜索 CLI。
-- M2：Unpaywall、开放访问 PDF 获取、PDF 内容校验、PyMuPDF 解析和全文状态闭环。
-- M3：配置化 OpenAI-compatible LLM、严格 Research Card Schema、提示词版本和 AI 调用审计。
-- M4：`AUTHOR_CLAIM`、逐字 Evidence Pointer、本地页码/偏移验证、字段验证状态。
-- M5：三论文比较、冲突与 Research Gap 分析、Candidate Research Question。
-- M6：可恢复、可审计、阶段幂等的端到端 CLI Pipeline。
-- M7：Papers、Paper Detail、Claims、Research Questions 极简 Web UI。
-
-当前状态：M0–M7 已完成，QRI V0.1 End-to-End POC 已交付。
-
-M1 验收查询 `momentum anomaly US equities` 的实测结果：发现 40 条、去重后 38 篇、25 篇含摘要。Semantic Scholar 在无 API Key 情况下返回 429，但降级隔离生效，其余公开来源正常给出真实论文列表。全文获取属于 M2，因此当前 `With full text` 为 0 是预期结果。
-
-自动测试覆盖：配置与密钥安全、核心表、严格 Schema 缺失字段、DOI/标题规范化、模糊去重、API 重试、API 超时、单来源故障隔离。
-
-M2 实测从真实候选中成功解析 3 篇全文：26、56、37 页，共 287,297 个字符。每份 PDF 都验证 `%PDF-` 文件签名并限制为 50 MB；解析文本保留页码和字符偏移，为 Evidence Pointer 提供基础。全文尝试失败记为 `FULLTEXT_UNAVAILABLE`，已有摘要仍以 `ABSTRACT` 文档保存，模型不得据此声称读过全文。
-
-M3 的默认主模型是 `claude-sonnet-4-6`，通过 `LLM_BASE_URL` 与 `LLM_API_KEY` 接入 OpenAI-compatible API。每次调用保存 requested/returned model、提示词版本、token、延迟、响应哈希和状态。模型输出必须通过 `ResearchCardExtraction` 严格校验，不能确认的字段必须为 `null`。当前本机未配置这两个环境变量，因此自动测试使用隔离的确定性夹具，真实数据库不会写入模拟 Research Card。
-
-M4 要求模型只提交逐字原文摘录，页码、段落索引和字符偏移由本地 PyMuPDF 解析结果计算。摘录无法在全文中逐字定位时会被拒绝；没有任何有效 Evidence 的 Claim 不入库；`SYSTEM_CONCLUSION` 在 Schema 层被禁止。Research Card 字段没有 Evidence Pointer 时返回 `UNVERIFIED`。这里的 `VERIFIED` 仅表示指针已在本地原文中验证，不表示作者主张已经成为客观事实。M4 使用 3 篇真实 PDF 做隔离夹具验收，得到 3 个 Claims、6 个 Evidence Pointers，真实数据库仍保持无模拟结果。
-
-M5 只对恰好 3 篇已有 Claims 的高价值论文调用 `REASONING_MODEL`（默认 `gpt-5.4`），分别进行一次多论文比较和一次最终问题生成。所有比较项与问题的文献支持必须引用输入集合中的 Claim ID；未知 ID 会使整次结果回滚。问题数量限制为 1–3，必须包含机制、反机制、数据需求、已知风险和四项评分，初始状态固定为 `HUMAN_REVIEW_REQUIRED`。只有人工改为 `HUMAN_APPROVED` 后 `export_candidate_question()` 才能输出标准 JSON，输出后状态变为 `EXPORTED`。隔离验收使用 3 篇真实全文输入，生成 1 条比较、1 个 Candidate Question 和 2 条推理模型审计；真实数据库仍未写入模拟研究结果。
-
-M6 将五个阶段串为一个 `qri pipeline` 命令。`pipeline_stage_runs` 为每个阶段保存状态、尝试次数、开始/结束时间、指标、错误和 JSON 检查点；使用 `--resume <run_id>` 时已成功阶段直接跳过。隔离恢复验收主动让第一次 Research Card 调用失败，随后从同一 run_id 恢复：SEARCH/FULLTEXT 均未重跑，最终得到 3 Papers、3 PDFs、3 Research Cards、3 Claims、6 Evidence Pointers、1 Comparison 和 1 Candidate Question。再次恢复已完成任务不会重复创建 Question。M6 同时收紧模糊去重：只有标题、作者和发表年份都可用并匹配时才允许 fuzzy merge。
-
-M7 提供四个只读页面：Papers、Paper Detail、Claims、Research Questions。Paper Detail 同时展示 Metadata、Documents、Research Card、Claims 和 Evidence；从 Research Card 字段或 Claim 点击 Evidence 会回到同页对应的原文摘录，显示页码、章节、段落索引和字符偏移。页面不提供策略、回测、交易或自动审批入口。启动后访问 `http://127.0.0.1:8000/papers`。
+- M0–M2：项目骨架、论文聚合、去重、开放全文获取与解析
+- M3–M4：Research Card、Claim 与 Evidence Pointer
+- M5–M7：论文比较、候选研究问题、可恢复流水线与中文 Web UI
+- M8–M9：每日任务、中文摘要、归档与研究价值排名
+- V0.2 基线：Research Validation Spec、人工审核、研究包导出，以及旧策略能力只读归档

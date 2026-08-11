@@ -94,3 +94,61 @@ async def test_no_location_without_abstract_is_unavailable(tmp_path: Path) -> No
         )
         result = await service.acquire(paper)
         assert result.status == FullTextStatus.FULLTEXT_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_unpaywall_returns_all_pdf_locations_with_repository_first() -> None:
+    payload = {
+        "is_oa": True,
+        "best_oa_location": {
+            "url_for_pdf": "https://publisher.test/paper.pdf",
+            "host_type": "publisher",
+        },
+        "oa_locations": [
+            {
+                "url_for_pdf": "https://publisher.test/paper.pdf",
+                "host_type": "publisher",
+            },
+            {
+                "url_for_pdf": "https://repository.test/paper.pdf",
+                "host_type": "repository",
+            },
+        ],
+    }
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json=payload, request=request)
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        locations = await UnpaywallProvider("researcher@example.com", client=client).lookup_all(
+            "10.1234/example"
+        )
+    assert [location.url for location in locations] == [
+        "https://repository.test/paper.pdf",
+        "https://publisher.test/paper.pdf",
+    ]
+
+
+def test_manual_pdf_upload_is_parsed_and_persisted(tmp_path: Path) -> None:
+    engine = build_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        paper = Paper(
+            title="Manual upload",
+            normalized_title="manual upload",
+            authors_json=[],
+            source="test",
+        )
+        session.add(paper)
+        session.commit()
+        service = FullTextService(
+            session,
+            PDFDownloader(),
+            PyMuPDFParser(),
+            UnpaywallProvider(None),
+            tmp_path,
+        )
+        result = service.ingest_uploaded_pdf(paper, make_pdf())
+        assert result.status == FullTextStatus.FULLTEXT_AVAILABLE
+        assert result.page_count == 1
+        assert result.character_count > 0
+        assert paper.fulltext_failure_reason is None

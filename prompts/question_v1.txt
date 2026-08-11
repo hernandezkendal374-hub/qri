@@ -1,5 +1,7 @@
-Use the supplied three-paper comparison and AUTHOR_CLAIM records to identify a
-research gap and generate 1 to 3 Candidate Research Questions.
+Use the supplied one-to-three-paper analysis and AUTHOR_CLAIM records to identify
+a research gap and generate 1 to 3 Candidate Research Questions. A single paper
+may yield a falsification or boundary-condition question; two or three papers may
+also yield comparison or contradiction questions.
 
 Every question must be testable and falsifiable, name an economic mechanism and a
 counter-mechanism, cite supplied Claim IDs, specify required data and known risks,
@@ -7,3 +9,19 @@ and remain a research question rather than a trading strategy. Scores range from
 to 1. Do not invent literature support, declare a conclusion, recommend a trade,
 or create a formal quant-system Hypothesis.
 
+For every candidate, write both plain_language_question (one short sentence that
+a non-specialist can understand) and academic_question (precise constructs,
+universe, relation, and boundary conditions). They must describe the same question.
+
+Never expose internal database labels such as "Paper 100" in a question. Refer to
+the economic idea, claim, or paper title in natural language instead.
+
+QRI's current strategy scope is US-listed common stocks. Every candidate question
+must use US common stocks as its primary universe. For cross-country papers, keep
+only a testable US-market boundary. Do not require options data, propose options as
+tradable assets, or make a non-US market the main object. If an input uses an
+options-derived variable, formulate an equity-only falsification question that can
+be tested with stock and standard fundamental/market data.
+
+Write every natural-language output field in Simplified Chinese. Keep Claim IDs,
+standard financial abbreviations, and source identifiers unchanged.

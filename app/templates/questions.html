@@ -1,15 +1,84 @@
 {% extends "base.html" %}
-{% block title %}Research Questions{% endblock %}
-{% block content %}
-<section class="page-heading"><div><p class="eyebrow">Human Review Queue</p><h1>Research Questions</h1></div><p class="lede">可验证、可证伪，但尚未成为正式 Hypothesis。</p></section>
-{% for question in questions %}
-<article class="question-card">
-  <div class="question-top"><span class="question-id">{{ question.question_uid }}</span><span class="status {{ question.status.value|lower }}">{{ question.status.value }}</span></div>
-  <p class="question-text">{{ question.question }}</p>
-  <div class="mechanism-grid"><div><small>Economic mechanism</small><p>{{ question.economic_mechanism }}</p></div><div><small>Counter mechanism</small><p>{{ question.counter_mechanism }}</p></div></div>
-  <div class="score-row"><span>Novelty <strong>{{ '%.2f'|format(question.novelty_score or 0) }}</strong></span><span>Testability <strong>{{ '%.2f'|format(question.testability_score or 0) }}</strong></span><span>Data <strong>{{ '%.2f'|format(question.data_availability_score or 0) }}</strong></span><span>Priority <strong>{{ '%.2f'|format(question.research_priority_score or 0) }}</strong></span></div>
-  <details><summary>Literature & requirements</summary><div class="detail-grid"><div><small>Supporting Claim IDs</small><p>{{ question.supporting_claims_json }}</p></div><div><small>Contradicting Claim IDs</small><p>{{ question.contradicting_claims_json }}</p></div><div><small>Required data</small><p>{{ question.required_data_json }}</p></div><div><small>Known risks</small><p>{{ question.known_risks_json }}</p></div></div></details>
-</article>
-{% else %}<div class="empty"><h2>尚无 Candidate Research Questions</h2><p>需要三篇具备 Claims 的论文后运行 <code>qri questions</code>。</p></div>{% endfor %}
-{% endblock %}
+{% block title %}研究问题{% endblock %}
 
+{% macro list_items(items) %}<ul>{% for item in items or [] %}<li>{{ item }}</li>{% else %}<li class="muted">尚未定义</li>{% endfor %}</ul>{% endmacro %}
+
+{% macro render_question(question, translation, handoff, validation, legacy, rank=none, archived=false) %}
+{% set spec = validation.specification_json if validation else none %}
+{% set plain = spec.plain_language_question if spec else question.plain_language_question or (translation.question_zh if translation else question.question) %}
+{% set academic = spec.academic_question if spec else question.academic_question or (translation.question_zh if translation else question.question) %}
+<article id="question-{{ question.id }}" class="question-card validation-card {% if rank == 1 %}priority-question{% endif %} {% if archived %}archived-question{% endif %}">
+  <div class="question-top">
+    <span class="question-id">{% if rank %}排名 #{{ rank }} · {% endif %}{{ question.question_uid }}</span>
+    <div class="question-actions">
+      <span class="status {{ question.status.value|lower }}">{{ question.status|question_status_zh }}</span>
+      <form method="post" action="/questions/{{ question.id }}/{{ 'restore' if archived else 'archive' }}"><button class="text-button" type="submit">{{ '恢复' if archived else '归档' }}</button></form>
+    </div>
+  </div>
+
+  <div class="plain-question"><small>一句话版本</small><h2>{{ plain }}</h2></div>
+  <details class="academic-question"><summary>查看学术定义</summary><p>{{ academic }}</p></details>
+
+  {% if validation %}
+  <div class="validation-status-line"><span>Research Validation Spec</span><b class="review-{{ validation.review_status|lower }}">{{ '草稿待审核' if validation.review_status == 'DRAFT' else '人工已通过' if validation.review_status == 'APPROVED' else '已导出' }}</b></div>
+
+  <section class="validation-module"><div class="module-number">1</div><div><small>这到底在研究什么？</small><h3>{{ spec.research_object }}</h3><p>{{ spec.academic_question }}</p></div></section>
+
+  <div class="validation-two-column">
+    <section class="validation-module"><div class="module-number">2</div><div><small>为什么可能成立？</small><h3>经济机制</h3><p>{{ spec.economic_mechanism }}</p></div></section>
+    <section class="validation-module"><div class="module-number">3</div><div><small>为什么可能不成立？</small><h3>反向机制与关键反证</h3><p>{{ spec.counter_mechanism }}</p>{{ list_items(spec.falsification_conditions) }}</div></section>
+  </div>
+
+  <section class="validation-module validation-design"><div class="module-number">4</div><div><small>怎么验证？</small><h3>研究验证设计</h3>
+    <div class="variable-grid">
+      <div><b>因变量</b><p>{{ spec.dependent_variable.name }}：{{ spec.dependent_variable.measurement }}</p></div>
+      <div><b>核心自变量</b>{{ list_items(spec.independent_variables | map(attribute='name') | list) }}</div>
+      <div><b>交互项</b>{{ list_items(spec.interaction_terms | map(attribute='name') | list) }}</div>
+      <div><b>控制变量</b>{{ list_items(spec.control_variables | map(attribute='name') | list) }}</div>
+    </div>
+    <details><summary>样本、PIT、统计检验与样本外设计</summary><div class="validation-detail-grid">
+      <div><b>样本设计</b>{{ list_items(spec.sample_design) }}</div>
+      <div><b>Point-in-Time 要求</b>{{ list_items(spec.point_in_time_requirements) }}</div>
+      <div><b>统计检验</b>{{ list_items(spec.statistical_tests) }}</div>
+      <div><b>样本外设计</b>{{ list_items(spec.out_of_sample_design) }}</div>
+      <div><b>最低数据需求</b>{{ list_items(spec.minimum_data_requirements) }}</div>
+      <div><b>成功标准</b>{{ list_items(spec.success_criteria) }}</div>
+    </div></details>
+  </div></section>
+
+  <section class="validation-module validation-risks"><div class="module-number">5</div><div><small>最容易得出假结论的地方</small><h3>偏差、现实约束与人工检查</h3><div class="validation-detail-grid">
+    <div><b>研究偏差</b>{{ list_items(spec.bias_risks) }}</div>
+    <div><b>实施敏感性</b>{{ list_items(spec.implementation_sensitivities) }}</div>
+    <div><b>人工审核问题</b>{{ list_items(spec.human_review_questions) }}</div>
+    <div><b>禁止解释</b>{{ list_items(spec.prohibited_interpretations) }}</div>
+  </div></div></section>
+
+  {% if not archived %}<div class="validation-actions">
+    <form method="post" action="/questions/{{ question.id }}/validation-spec"><button class="secondary-button" type="submit">重新生成验证方案</button></form>
+    {% if validation.review_status == 'DRAFT' %}<form method="post" action="/questions/{{ question.id }}/approve"><button class="primary-button" type="submit">人工审核通过</button></form>{% endif %}
+    {% if validation.review_status in ['APPROVED', 'EXPORTED'] %}<a class="primary-button" href="/questions/{{ question.id }}/validation-spec.json">导出 Candidate Question</a>{% endif %}
+  </div>{% endif %}
+  {% else %}
+  <div class="validation-empty"><div><small>下一步</small><h3>生成研究验证方案</h3><p>定义变量、控制项、PIT、统计检验、样本外设计与反证条件；不会生成仓位或回测。</p></div>{% if not archived %}<form method="post" action="/questions/{{ question.id }}/validation-spec"><button class="primary-button" type="submit">生成验证方案</button></form>{% endif %}</div>
+  {% endif %}
+
+  <details class="evidence-chain"><summary>查看 Claim / Evidence 证据链</summary><div>{% for item in handoff.literature_evidence %}<article><b>Claim #{{ item.claim_id }} · {{ item.paper.title }}</b><p>{{ item.author_claim }}</p><small>{{ item.evidence|length }} 条原文证据</small></article>{% else %}<p class="muted">尚无证据链。</p>{% endfor %}</div></details>
+
+  {% if legacy %}<details class="legacy-archive"><summary>历史策略与回测数据（只读归档）</summary><p>该数据由旧版 QRI 生成，已移出当前研究主流程，不参与排名或审核。</p><a class="secondary-button" href="/questions/{{ question.id }}/strategy-spec.json">下载旧版归档 JSON</a></details>{% endif %}
+</article>
+{% endmacro %}
+
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">人工审核队列</p><h1>候选研究问题</h1></div><p class="lede">QRI 只负责判断什么值得研究、如何证伪，以及最容易在哪里被骗；不负责生成交易策略。</p></section>
+<div class="boundary-banner"><strong>当前主链</strong><span>Claim / Evidence → Candidate Research Question → Research Validation Spec → 人工审核 → Export</span></div>
+<div class="ranking-summary"><div><strong>{{ active_rows|length }}</strong><span>活跃问题</span></div><div><strong>{{ daily_groups|length }}</strong><span>每日档案</span></div><div><strong>{{ archived_rows|length }}</strong><span>人工归档</span></div><p>每日排名只看研究价值，不读取任何策略或回测指标。</p></div>
+
+{% for group in daily_groups %}
+<details class="daily-question-archive" id="questions-{{ group.date }}" {% if group.is_today %}open{% endif %}>
+  <summary><span><small>每日研究档案</small><strong>{{ group.label }}</strong></span><b>{{ group.rows|length }} 个问题</b></summary>
+  <div class="daily-question-list">{% for question, translation in group.rows %}{{ render_question(question, translation, handoff_by_question.get(question.id), validation_by_question.get(question.id), legacy_by_question.get(question.id), loop.index, false) }}{% endfor %}</div>
+</details>
+{% else %}<div class="empty"><h2>尚无活跃研究问题</h2><p>新问题会先生成验证方案，再进入人工审核。</p></div>{% endfor %}
+
+<details id="archived-questions" class="archive-section" {% if not active_rows and archived_rows %}open{% endif %}><summary>已归档问题（{{ archived_rows|length }}）</summary><div class="archive-list">{% for question, translation in archived_rows %}{{ render_question(question, translation, handoff_by_question.get(question.id), validation_by_question.get(question.id), legacy_by_question.get(question.id), none, true) }}{% else %}<p class="muted">尚无已归档问题。</p>{% endfor %}</div></details>
+{% endblock %}

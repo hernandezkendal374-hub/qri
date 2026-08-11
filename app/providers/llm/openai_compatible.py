@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import httpx
@@ -18,9 +19,23 @@ class OpenAICompatibleProvider(LLMProvider):
         messages: list[dict[str, str]],
         response_schema: dict[str, Any] | None = None,
     ) -> LLMResponse:
-        payload: dict[str, Any] = {"model": model, "messages": messages}
+        request_messages = [message.copy() for message in messages]
+        payload: dict[str, Any] = {"model": model, "messages": request_messages}
         if response_schema:
-            payload["response_format"] = {"type": "json_schema", "json_schema": response_schema}
+            # Use the broadly supported JSON-object mode and perform strict Pydantic
+            # validation locally. Some compatible gateways corrupt nested $ref schemas
+            # when proxying json_schema to different upstream model vendors.
+            payload["response_format"] = {"type": "json_object"}
+            schema_instruction = (
+                "\n\nMANDATORY OUTPUT CONTRACT:\n"
+                "Return exactly one JSON object and no surrounding prose or markdown. "
+                "The object must validate against this JSON Schema. Do not add fields.\n"
+                + json.dumps(response_schema["schema"], ensure_ascii=False, separators=(",", ":"))
+            )
+            if request_messages and request_messages[0].get("role") == "system":
+                request_messages[0]["content"] += schema_instruction
+            else:
+                request_messages.insert(0, {"role": "system", "content": schema_instruction})
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",

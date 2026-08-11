@@ -1,51 +1,136 @@
 {% extends "base.html" %}
 {% block title %}{{ paper.title }}{% endblock %}
 {% block content %}
-<a class="back" href="/papers">← 返回 Papers</a>
+<a class="back" href="/papers">← 返回论文库</a>
+<div class="scope-decision"><span class="scope-badge {{ paper.research_scope|lower }}">{{ paper.research_scope|research_scope_zh }}</span><p>{{ paper.scope_reason or '尚未完成研究范围分类。' }}</p>{% if paper.scope_confidence is not none %}<small>分类置信度 {{ '%.0f%%'|format(paper.scope_confidence * 100) }}</small>{% endif %}<div class="scope-actions"><form method="post" action="/papers/{{ paper.id }}/scope/US_EQUITY_CORE"><button class="text-button" type="submit">设为美股核心</button></form><form method="post" action="/papers/{{ paper.id }}/scope/US_EQUITY_AUXILIARY"><button class="text-button" type="submit">设为辅助信号</button></form><form method="post" action="/papers/{{ paper.id }}/scope/OUT_OF_SCOPE"><button class="text-button" type="submit">范围外归档</button></form></div></div>
 <section class="paper-hero">
-  <p class="eyebrow">Paper {{ paper.paper_uid }}</p>
+  <p class="eyebrow">论文编号 {{ paper.paper_uid }}</p>
   <h1>{{ paper.title }}</h1>
   <div class="meta-row">
-    <span>{{ paper.publication_date or '日期未知' }}</span><span>{{ paper.venue or 'Venue 未知' }}</span><span>{{ paper.doi or paper.arxiv_id or '无外部标识' }}</span>
+    <span>{{ paper.publication_date or '日期未知' }}</span><span>{{ paper.venue or '期刊或会议未知' }}</span><span>{{ paper.doi or paper.arxiv_id or '无外部标识' }}</span>
   </div>
   {% if paper.abstract %}<p class="abstract">{{ paper.abstract }}</p>{% endif %}
 </section>
 
-<section><div class="section-title"><h2>Documents</h2><span>{{ documents|length }}</span></div>
+<section class="fulltext-access" id="fulltext-access">
+  <div class="section-title"><h2>全文获取</h2><span class="status {{ paper.fulltext_status.value|lower }}">{{ paper.fulltext_status|fulltext_status_zh }}</span></div>
+  {% if request.query_params.get('fulltext') == 'available' %}<div class="task-message success">已成功取得并解析全文 PDF。</div>{% endif %}
+  {% if request.query_params.get('fulltext') == 'failed' %}<div class="task-message">本次仍未取得开放 PDF，下面显示具体原因。</div>{% endif %}
+  <div class="access-grid">
+    <div>
+      <small>当前判断</small>
+      {% if paper.fulltext_status.value == 'FULLTEXT_AVAILABLE' %}
+      <p><strong>全文已经进入 QRI。</strong>可以继续生成研究卡、作者主张和原文证据。</p>
+      {% elif paper.fulltext_status.value == 'FULLTEXT_UNAVAILABLE' %}
+      <p><strong>{{ paper.fulltext_failure_reason|fulltext_reason_zh }}</strong></p>
+      {% else %}
+      <p><strong>系统目前只有元数据或摘要，尚未成功解析完整 PDF。</strong></p>
+      {% endif %}
+      {% if paper.fulltext_attempted_at %}<small>上次尝试：{{ paper.fulltext_attempted_at.strftime('%Y-%m-%d %H:%M') }}</small>{% endif %}
+    </div>
+    <div class="access-actions">
+      {% if paper.fulltext_status.value != 'FULLTEXT_AVAILABLE' %}
+      <form method="post" action="/papers/{{ paper.id }}/fulltext/retry"><button class="primary-button" type="submit">重新查找开放全文</button></form>
+      {% endif %}
+      <label class="upload-control"><span>上传你合法持有的 PDF（最大 50 MB）</span><input id="pdf-upload" type="file" accept="application/pdf,.pdf"></label>
+      <button class="secondary-button upload-button" id="pdf-upload-button" type="button">上传并解析 PDF</button>
+      <small id="pdf-upload-status"></small>
+    </div>
+  </div>
+  <div class="external-sources">
+    {% if paper.source_url %}<a href="{{ paper.source_url }}" target="_blank" rel="noopener">打开论文来源页 ↗</a>{% endif %}
+    {% if paper.pdf_url %}<a href="{{ paper.pdf_url }}" target="_blank" rel="noopener">尝试在浏览器打开 PDF ↗</a>{% endif %}
+  </div>
+</section>
+
+<section id="abstract-brief">
+  <div class="section-title"><h2>AI 摘要解读</h2><span>{{ brief.model if brief else '仅基于标题与摘要' }}</span></div>
+  {% if brief %}
+  <div class="scope-warning"><strong>证据级别：摘要级</strong><span>AI 未阅读完整 PDF，以下内容不能替代研究卡片或原文证据。</span></div>
+  <article class="brief-card">
+    <div class="brief-lead"><small>一句话说明</small><p>{{ brief.summary_zh }}</p></div>
+    <div class="brief-grid">
+      <div><small>核心原理</small><p>{{ brief.core_principle_zh }}</p></div>
+      <div><small>经济机制</small><p>{{ brief.economic_mechanism_zh }}</p></div>
+      <div><small>摘要透露的方法</small><p>{{ brief.methodology_zh or '摘要没有提供足够方法信息。' }}</p></div>
+      <div><small>给研究者的提示</small><p>{{ brief.reader_takeaway_zh }}</p></div>
+    </div>
+    <div class="brief-lists">
+      <div><small>作者在摘要中报告</small><ul>{% for item in brief.reported_findings_json %}<li>{{ item }}</li>{% else %}<li>摘要没有报告可确认的结果。</li>{% endfor %}</ul></div>
+      <div><small>局限与注意事项</small><ul>{% for item in brief.limitations_json %}<li>{{ item }}</li>{% endfor %}</ul></div>
+    </div>
+    <footer class="brief-meta">AI 解读置信度 {{ '%.0f%%'|format((brief.confidence or 0) * 100) }} · 来源范围 {{ brief.source_scope }}</footer>
+  </article>
+  {% elif paper.abstract %}
+  <div class="brief-cta">
+    <div><strong>这篇论文已有摘要，可以先生成原理解读</strong><p>AI 会解释研究问题、核心机制、摘要透露的方法和局限，并明确标记为“未经全文验证”。</p></div>
+    <form method="post" action="/papers/{{ paper.id }}/abstract-brief"><button class="primary-button" type="submit">生成 AI 摘要解读</button></form>
+  </div>
+  {% else %}
+  <div class="empty compact"><p>该论文既没有完整 PDF，也没有可用摘要，暂时无法进行可靠解读。</p></div>
+  {% endif %}
+</section>
+
+<section><div class="section-title"><h2>文档</h2><span>{{ documents|length }}</span></div>
   <div class="compact-grid">
-  {% for document in documents %}<article class="mini-card"><strong>{{ document.document_type }}</strong><span>{{ document.parser_version or '未解析' }}</span><small>{{ document.content_hash[:12] if document.content_hash else 'no hash' }}</small></article>
+  {% for document in documents %}<article class="mini-card"><strong>{{ document.document_type }}</strong><span>{{ document.parser_version or '未解析' }}</span><small>{{ document.content_hash[:12] if document.content_hash else '无内容指纹' }}</small></article>
   {% else %}<p class="muted">没有已保存文档。</p>{% endfor %}
   </div>
 </section>
 
-<section><div class="section-title"><h2>Research Card</h2><span>{{ card.model if card else '未生成' }}</span></div>
+<section><div class="section-title"><h2>研究卡片（Research Card）</h2><span>{{ card.model if card else '未生成' }}</span></div>
 {% if card %}
   <div class="field-grid">
   {% for field in card_fields %}
     <article class="field-card">
-      <div class="field-head"><code>{{ field.name }}</code><span class="verification {{ field.status|lower }}">{{ field.status }}</span></div>
-      <div class="field-value">{% if field.value is not none and field.value != [] %}{{ field.value }}{% else %}<span class="null">null</span>{% endif %}</div>
-      {% for pointer in evidence_by_field.get(field.name, []) %}<a href="#evidence-{{ pointer.id }}">Evidence #{{ pointer.id }} · p.{{ pointer.page_number or '?' }}</a>{% endfor %}
+      <div class="field-head"><strong>{{ field.label }}</strong><span class="verification {{ field.status|lower }}" title="{{ field.status }}">{{ field.status|verification_status_zh }}</span></div>
+      <div class="field-value">{% if field.value is not none and field.value != [] %}{{ field.value }}{% else %}<span class="null">暂无数据</span>{% endif %}</div>
+      {% for pointer in evidence_by_field.get(field.name, []) %}<a href="#evidence-{{ pointer.id }}">原文证据 #{{ pointer.id }} · 第 {{ pointer.page_number or '?' }} 页</a>{% endfor %}
     </article>
   {% endfor %}
   </div>
-{% else %}<div class="empty compact"><p>尚未生成 Research Card。只有完整 PDF 才能进入分析。</p></div>{% endif %}
+{% else %}<div class="empty compact"><p>尚未生成研究卡片。只有获得完整 PDF 后才能进入分析。</p></div>{% endif %}
 </section>
 
-<section><div class="section-title"><h2>Author Claims</h2><span>{{ claims|length }}</span></div>
+<section><div class="section-title"><h2>作者主张</h2><span>{{ claims|length }}</span></div>
 {% for claim in claims %}
-  <article class="claim-card"><div class="claim-id">CLAIM #{{ claim.id }} · {{ claim.claim_type }}</div><p>{{ claim.claim_text }}</p>
-  <div class="evidence-links">{% for pointer in evidence_by_claim.get(claim.id, []) %}<a href="#evidence-{{ pointer.id }}">查看 Evidence #{{ pointer.id }} · p.{{ pointer.page_number or '?' }}</a>{% else %}<span class="danger">UNVERIFIED · 无 Evidence</span>{% endfor %}</div></article>
-{% else %}<div class="empty compact"><p>尚无 Claims。</p></div>{% endfor %}
+  <article class="claim-card"><div class="claim-id" title="{{ claim.claim_type }}">主张 #{{ claim.id }} · {{ claim.claim_type|claim_type_zh }}</div><p>{{ claim.claim_text }}</p>
+  <div class="evidence-links">{% for pointer in evidence_by_claim.get(claim.id, []) %}<a href="#evidence-{{ pointer.id }}">查看原文证据 #{{ pointer.id }} · 第 {{ pointer.page_number or '?' }} 页</a>{% else %}<span class="danger">未验证 · 暂无原文证据</span>{% endfor %}</div></article>
+{% else %}<div class="empty compact"><p>尚无作者主张。</p></div>{% endfor %}
 </section>
 
-<section><div class="section-title"><h2>Evidence Pointers</h2><span>{{ pointers|length }}</span></div>
+<section><div class="section-title"><h2>原文证据定位</h2><span>{{ pointers|length }}</span></div>
 {% for pointer in pointers %}
   <article id="evidence-{{ pointer.id }}" class="evidence-card {% if selected_evidence == pointer.id %}selected{% endif %}">
-    <div class="evidence-meta"><strong>Evidence #{{ pointer.id }}</strong><span>Page {{ pointer.page_number or '?' }}</span><span>{{ pointer.section or 'Section 未标注' }}</span><span>Paragraph {{ pointer.paragraph_index if pointer.paragraph_index is not none else '?' }}</span><span>Offset {{ pointer.start_offset or 0 }}–{{ pointer.end_offset or 0 }}</span></div>
+    <div class="evidence-meta"><strong>原文证据 #{{ pointer.id }}</strong><span>第 {{ pointer.page_number or '?' }} 页</span><span>{{ pointer.section or '章节未标注' }}</span><span>第 {{ pointer.paragraph_index if pointer.paragraph_index is not none else '?' }} 段</span><span title="Offset {{ pointer.start_offset or 0 }}–{{ pointer.end_offset or 0 }}">字符位置 {{ pointer.start_offset or 0 }}–{{ pointer.end_offset or 0 }}</span></div>
     <blockquote>{{ pointer.source_text }}</blockquote>
   </article>
 {% else %}<div class="empty compact"><p>没有可回指的原文证据。</p></div>{% endfor %}
 </section>
+<script>
+(() => {
+  const input = document.getElementById('pdf-upload');
+  const button = document.getElementById('pdf-upload-button');
+  const status = document.getElementById('pdf-upload-status');
+  button.addEventListener('click', async () => {
+    const file = input.files[0];
+    if (!file) { status.textContent = '请先选择 PDF 文件。'; return; }
+    if (file.size > 50 * 1024 * 1024) { status.textContent = '文件超过 50 MB。'; return; }
+    button.disabled = true;
+    status.textContent = '正在上传并解析，请稍候…';
+    try {
+      const response = await fetch('/papers/{{ paper.id }}/fulltext/upload', {
+        method: 'POST', headers: {'Content-Type': 'application/pdf'}, body: file
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || '上传失败');
+      status.textContent = `解析完成：${result.pages} 页，${result.characters} 个字符。`;
+      window.location.href = '/papers/{{ paper.id }}?fulltext=available#fulltext-access';
+    } catch (error) {
+      status.textContent = `上传失败：${error.message}`;
+      button.disabled = false;
+    }
+  });
+})();
+</script>
 {% endblock %}
-

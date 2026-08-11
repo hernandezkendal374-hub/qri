@@ -12,7 +12,7 @@ class EvidenceQuote(BaseModel):
 
 class AuthorClaimCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    claim_type: Literal["AUTHOR_CLAIM"]
+    claim_type: Literal["AUTHOR_CLAIM"] = "AUTHOR_CLAIM"
     claim_text: str = Field(min_length=1)
     normalized_claim: str | None = None
     direction: Literal["POSITIVE", "NEGATIVE", "MIXED", "NEUTRAL", "UNKNOWN"] | None = None
@@ -31,6 +31,19 @@ class ClaimEvidenceExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     claims: list[AuthorClaimCandidate] = Field(default_factory=list)
     research_card_evidence: list[ResearchCardFieldEvidence] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_single_claim(cls, value: object) -> object:
+        """Accept a schema-valid claim item when a gateway drops only the root wrapper."""
+        if (
+            isinstance(value, dict)
+            and value.get("claim_type") == "AUTHOR_CLAIM"
+            and "claims" not in value
+            and "research_card_evidence" not in value
+        ):
+            return {"claims": [value], "research_card_evidence": []}
+        return value
 
     @model_validator(mode="after")
     def require_output(self) -> "ClaimEvidenceExtraction":

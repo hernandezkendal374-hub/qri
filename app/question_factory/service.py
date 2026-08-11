@@ -1,19 +1,35 @@
 import json
 import re
 import time
+import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.extraction.json_parser import parse_json_model
+from app.extraction.json_parser import parse_json_model, parse_json_object
 from app.models import Claim, PaperComparison, QuestionStatus, ResearchQuestion
 from app.providers.llm.audit import record_ai_call
 from app.providers.llm.base import LLMProvider, LLMResponse
 from app.schemas.comparison import CandidateQuestionSet
 
-PROMPT_VERSION = "candidate-question-v1"
+PROMPT_VERSION = "candidate-question-v2"
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "question_v1.txt"
+EXCLUDED_QUESTION_MARKERS = (
+    "日本市场",
+    "日本股市",
+    "中国市场",
+    "中国股市",
+    "欧洲市场",
+    "japanese market",
+    "china market",
+    "european market",
+    "期权隐含",
+    "期权数据",
+    "option-implied",
+    "options data",
+)
 
 
 class CandidateQuestionService:
@@ -53,15 +69,34 @@ class CandidateQuestionService:
             response = await self.provider.complete(
                 model=self.model, messages=messages, response_schema=schema
             )
-            result = parse_json_model(response.content, CandidateQuestionSet)
+            result = self._parse_result(response.content)
             self._validate_claim_ids(result, known_claim_ids)
             comparison.research_gap = result.research_gap
+            existing_questions = list(
+                self.session.scalars(select(ResearchQuestion.question))
+            )
+            accepted_items = []
+            normalized_questions = [
+                self._normalize_question(question) for question in existing_questions
+            ]
+            for item in result.questions:
+                if not self._in_current_scope(item.academic_question):
+                    continue
+                normalized = self._normalize_question(item.academic_question)
+                if any(
+                    SequenceMatcher(None, normalized, existing).ratio() >= 0.90
+                    for existing in normalized_questions
+                    if existing
+                ):
+                    continue
+                accepted_items.append(item)
+                normalized_questions.append(normalized)
             base_sequence = (
                 self.session.scalar(select(func.count()).select_from(ResearchQuestion)) or 0
             )
             questions = [
                 self._to_model(item, base_sequence + index)
-                for index, item in enumerate(result.questions, 1)
+                for index, item in enumerate(accepted_items, 1)
             ]
             self.session.add_all(questions)
             record_ai_call(
@@ -93,22 +128,66 @@ class CandidateQuestionService:
 
     def _to_model(self, item, sequence: int) -> ResearchQuestion:
         family_code = re.sub(r"[^A-Z0-9]+", "-", item.family.upper()).strip("-")[:20]
+        if not family_code:
+            family_code = "RESEARCH"
         return ResearchQuestion(
             question_uid=f"RQ-{family_code}-{sequence:04d}",
-            family=item.family,
-            question=item.question,
-            economic_mechanism=item.economic_mechanism,
-            counter_mechanism=item.counter_mechanism,
+            family=self._sanitize_text(item.family),
+            question=self._sanitize_text(item.academic_question),
+            plain_language_question=self._sanitize_text(item.plain_language_question),
+            academic_question=self._sanitize_text(item.academic_question),
+            economic_mechanism=self._sanitize_text(item.economic_mechanism),
+            counter_mechanism=self._sanitize_text(item.counter_mechanism),
             supporting_claims_json=item.supporting_claim_ids,
             contradicting_claims_json=item.contradicting_claim_ids,
-            required_data_json=item.required_data,
-            known_risks_json=item.known_risks,
+            required_data_json=[self._sanitize_text(value) for value in item.required_data],
+            known_risks_json=[self._sanitize_text(value) for value in item.known_risks],
             novelty_score=item.novelty_score,
             testability_score=item.testability_score,
             data_availability_score=item.data_availability_score,
             research_priority_score=item.research_priority_score,
             status=QuestionStatus.HUMAN_REVIEW_REQUIRED,
         )
+
+    @staticmethod
+    def _parse_result(content: str) -> CandidateQuestionSet:
+        try:
+            return parse_json_model(content, CandidateQuestionSet)
+        except Exception as original_error:
+            value = parse_json_object(content)
+            questions = value.get("questions")
+            score_fields = (
+                "novelty_score",
+                "testability_score",
+                "data_availability_score",
+                "research_priority_score",
+            )
+            if not isinstance(questions, list) or not all(
+                field in value for field in score_fields
+            ):
+                raise original_error
+            for question in questions:
+                if not isinstance(question, dict):
+                    raise original_error
+                for field in score_fields:
+                    question.setdefault(field, value[field])
+            for field in score_fields:
+                value.pop(field, None)
+            return CandidateQuestionSet.model_validate(value)
+
+    @staticmethod
+    def _normalize_question(value: str) -> str:
+        value = unicodedata.normalize("NFKC", value).casefold()
+        return "".join(character for character in value if character.isalnum())
+
+    @staticmethod
+    def _in_current_scope(value: str) -> bool:
+        normalized = unicodedata.normalize("NFKC", value).casefold()
+        return not any(marker in normalized for marker in EXCLUDED_QUESTION_MARKERS)
+
+    @staticmethod
+    def _sanitize_text(value: str) -> str:
+        return re.sub(r"\bPaper\s+\d+\b", "证据来源", value, flags=re.IGNORECASE)
 
     @staticmethod
     def _comparison_payload(comparison: PaperComparison) -> dict:

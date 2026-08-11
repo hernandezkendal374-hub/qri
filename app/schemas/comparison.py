@@ -30,7 +30,8 @@ class MultiPaperComparison(BaseModel):
 class CandidateQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     family: str = Field(min_length=1)
-    question: str = Field(min_length=20)
+    plain_language_question: str = Field(min_length=10)
+    academic_question: str = Field(min_length=20)
     economic_mechanism: str = Field(min_length=1)
     counter_mechanism: str = Field(min_length=1)
     supporting_claim_ids: list[int] = Field(min_length=1)

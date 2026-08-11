@@ -10,7 +10,7 @@ from app.providers.llm.audit import record_ai_call
 from app.providers.llm.base import LLMProvider, LLMResponse
 from app.schemas.comparison import MultiPaperComparison
 
-PROMPT_VERSION = "multi-paper-comparison-v1"
+PROMPT_VERSION = "multi-paper-comparison-v2"
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "comparison_v1.txt"
 SECTION_FIELDS = tuple(MultiPaperComparison.model_fields)
 
@@ -28,8 +28,8 @@ class MultiPaperComparisonService:
         run_id: str | None = None,
     ) -> PaperComparison:
         paper_ids = {paper.id for paper in papers}
-        if len(paper_ids) != 3:
-            raise ValueError("M5 comparison requires exactly three distinct papers")
+        if not 1 <= len(paper_ids) <= 3:
+            raise ValueError("Comparison requires one to three distinct papers")
         known_claim_ids = {claim.id for claim in claims if claim.paper_id in paper_ids}
         if not known_claim_ids:
             raise ValueError("Comparison requires persisted AUTHOR_CLAIM inputs")

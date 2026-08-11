@@ -1,29 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Papers{% endblock %}
+{% block title %}论文库{% endblock %}
 {% block content %}
 <section class="page-heading">
-  <div><p class="eyebrow">Literature Registry</p><h1>Papers</h1></div>
+  <div><p class="eyebrow">文献登记库</p><h1>论文库</h1></div>
   <p class="lede">论文元数据、全文状态与研究提取的统一入口。</p>
 </section>
+<div class="status-guide">
+  <span><strong>全文可用</strong> 已下载并解析，可以生成研究卡</span>
+  <span><strong>仅有摘要</strong> 尚未成功取得 PDF</span>
+  <span><strong>获取失败</strong> 已尝试，但受到付费墙、验证页或失效地址限制</span>
+  <span><strong>尚未检查</strong> 等待全文查找任务</span>
+</div>
+<div class="scope-filter">
+  <a class="{{ 'active' if not scope }}" href="/papers">全部</a>
+  {% for code, label in scope_labels.items() %}<a class="{{ 'active' if scope == code }}" href="/papers?scope={{ code }}">{{ label }} <strong>{{ scope_counts.get(code, 0) }}</strong></a>{% endfor %}
+</div>
 {% if papers %}
 <div class="table-wrap">
   <table>
-    <thead><tr><th>论文</th><th>发表</th><th>来源</th><th>引用</th><th>全文状态</th></tr></thead>
+    <thead><tr><th>论文</th><th>研究范围</th><th>发表</th><th>来源</th><th>引用</th><th>全文状态</th></tr></thead>
     <tbody>
     {% for paper in papers %}
       <tr>
         <td><a class="title-link" href="/papers/{{ paper.id }}">{{ paper.title }}</a><small class="subline">{{ paper.doi or paper.arxiv_id or paper.paper_uid }}</small></td>
+        <td><span class="scope-badge {{ paper.research_scope|lower }}" title="{{ paper.scope_reason or '' }}">{{ paper.research_scope|research_scope_zh }}</span></td>
         <td>{{ paper.publication_date or '—' }}</td>
         <td>{{ paper.source }}</td>
         <td>{{ paper.citation_count if paper.citation_count is not none else '—' }}</td>
-        <td><span class="status {{ paper.fulltext_status.value|lower }}">{{ paper.fulltext_status.value }}</span></td>
+        <td><span class="status {{ paper.fulltext_status.value|lower }}" title="{{ paper.fulltext_failure_reason|fulltext_reason_zh if paper.fulltext_status.value == 'FULLTEXT_UNAVAILABLE' else paper.fulltext_status.value }}">{{ paper.fulltext_status|fulltext_status_zh }}</span></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
 {% else %}
-<div class="empty"><h2>尚无论文</h2><p>运行 <code>qri search "momentum anomaly US equities"</code> 开始发现论文。</p></div>
+<div class="empty"><h2>尚无论文</h2><p>运行论文采集任务后，这里会显示搜索结果。</p></div>
 {% endif %}
 {% endblock %}
-

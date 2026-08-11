@@ -64,11 +64,17 @@ class Paper(Base):
     open_access: Mapped[bool | None] = mapped_column(Boolean)
     license: Mapped[str | None] = mapped_column(String(255))
     citation_count: Mapped[int | None] = mapped_column(Integer)
+    research_scope: Mapped[str] = mapped_column(String(32), default="UNCLASSIFIED", index=True)
+    scope_reason: Mapped[str | None] = mapped_column(Text)
+    scope_confidence: Mapped[float | None] = mapped_column(Float)
+    scope_version: Mapped[str | None] = mapped_column(String(64))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     fulltext_status: Mapped[FullTextStatus] = mapped_column(
         Enum(FullTextStatus), default=FullTextStatus.UNKNOWN
     )
+    fulltext_failure_reason: Mapped[str | None] = mapped_column(Text)
+    fulltext_attempted_at: Mapped[datetime | None] = mapped_column(DateTime)
     raw_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -143,6 +149,24 @@ class ResearchCard(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class AbstractBrief(Base):
+    __tablename__ = "abstract_briefs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id"), unique=True, index=True)
+    summary_zh: Mapped[str] = mapped_column(Text)
+    core_principle_zh: Mapped[str] = mapped_column(Text)
+    economic_mechanism_zh: Mapped[str] = mapped_column(Text)
+    methodology_zh: Mapped[str | None] = mapped_column(Text)
+    reported_findings_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    limitations_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    reader_takeaway_zh: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    model: Mapped[str] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    source_scope: Mapped[str] = mapped_column(String(32), default="TITLE_ABSTRACT")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Claim(Base):
     __tablename__ = "claims"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -201,6 +225,8 @@ class ResearchQuestion(Base):
     question_uid: Mapped[str] = mapped_column(String(64), unique=True)
     family: Mapped[str] = mapped_column(String(128))
     question: Mapped[str] = mapped_column(Text)
+    plain_language_question: Mapped[str | None] = mapped_column(Text)
+    academic_question: Mapped[str | None] = mapped_column(Text)
     economic_mechanism: Mapped[str] = mapped_column(Text)
     counter_mechanism: Mapped[str] = mapped_column(Text)
     supporting_claims_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
@@ -214,7 +240,54 @@ class ResearchQuestion(Base):
     status: Mapped[QuestionStatus] = mapped_column(
         Enum(QuestionStatus), default=QuestionStatus.HUMAN_REVIEW_REQUIRED
     )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class QuestionTranslation(Base):
+    __tablename__ = "question_translations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("research_questions.id"), unique=True, index=True
+    )
+    question_zh: Mapped[str] = mapped_column(Text)
+    economic_mechanism_zh: Mapped[str] = mapped_column(Text)
+    counter_mechanism_zh: Mapped[str] = mapped_column(Text)
+    required_data_zh_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    known_risks_zh_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    model: Mapped[str] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class StrategyIncubation(Base):
+    __tablename__ = "strategy_incubations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("research_questions.id"), unique=True, index=True
+    )
+    readiness_status: Mapped[str] = mapped_column(String(32), default="WAITING_FOR_DATA")
+    specification_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    model: Mapped[str] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ResearchValidationSpec(Base):
+    __tablename__ = "research_validation_specs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("research_questions.id"), unique=True, index=True
+    )
+    review_status: Mapped[str] = mapped_column(String(32), default="DRAFT")
+    specification_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    model: Mapped[str] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class PipelineRun(Base):

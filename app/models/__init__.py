@@ -1,4 +1,5 @@
 from app.models.entities import (
+    AbstractBrief,
     AICall,
     Claim,
     Document,
@@ -11,11 +12,15 @@ from app.models.entities import (
     PipelineRun,
     PipelineStageRun,
     QuestionStatus,
+    QuestionTranslation,
     ResearchCard,
     ResearchQuestion,
+    ResearchValidationSpec,
+    StrategyIncubation,
 )
 
 __all__ = [
+    "AbstractBrief",
     "AICall",
     "Claim",
     "Document",
@@ -28,6 +33,9 @@ __all__ = [
     "PipelineRun",
     "PipelineStageRun",
     "QuestionStatus",
+    "QuestionTranslation",
     "ResearchCard",
     "ResearchQuestion",
+    "ResearchValidationSpec",
+    "StrategyIncubation",
 ]

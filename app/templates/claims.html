@@ -1,10 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Claims{% endblock %}
+{% block title %}作者主张{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">Author Statements</p><h1>Claims</h1></div><p class="lede">论文作者主张，不等同于系统事实。</p></section>
+<section class="page-heading"><div><p class="eyebrow">论文作者陈述</p><h1>作者主张</h1></div><p class="lede">这里记录作者提出的结论或判断，不代表系统已确认其为事实。</p></section>
 {% for claim, paper in rows %}
-<article class="claim-card global"><div class="claim-id">CLAIM #{{ claim.id }} · {{ claim.claim_type }}</div><h2><a href="/papers/{{ paper.id }}">{{ paper.title }}</a></h2><p>{{ claim.claim_text }}</p>
-<div class="evidence-links">{% for pointer in evidence_by_claim.get(claim.id, []) %}<a href="/papers/{{ paper.id }}?evidence={{ pointer.id }}#evidence-{{ pointer.id }}">Evidence #{{ pointer.id }} · Page {{ pointer.page_number or '?' }}</a>{% else %}<span class="danger">UNVERIFIED · 无 Evidence</span>{% endfor %}</div></article>
-{% else %}<div class="empty"><h2>尚无 Claims</h2><p>配置 LLM 后运行 <code>qri claims --top 3</code>。</p></div>{% endfor %}
+<article class="claim-card global"><div class="claim-id" title="{{ claim.claim_type }}">主张 #{{ claim.id }} · {{ claim.claim_type|claim_type_zh }}</div><h2><a href="/papers/{{ paper.id }}">{{ paper.title }}</a></h2><p>{{ claim.claim_text }}</p>
+<div class="evidence-links">{% for pointer in evidence_by_claim.get(claim.id, []) %}<a href="/papers/{{ paper.id }}?evidence={{ pointer.id }}#evidence-{{ pointer.id }}">原文证据 #{{ pointer.id }} · 第 {{ pointer.page_number or '?' }} 页</a>{% else %}<span class="danger">未验证 · 暂无原文证据</span>{% endfor %}</div></article>
+{% else %}<div class="empty"><h2>尚无作者主张</h2><p>完成论文全文分析后，这里会显示提取结果。</p></div>{% endfor %}
 {% endblock %}
-

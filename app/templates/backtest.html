@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}快速回测{% endblock %}
+{% block content %}
+{% set unavailable = incubation.specification_json.quick_backtest_unavailable if incubation.specification_json.quick_backtest_unavailable else none %}
+<section class="page-heading">
+  <div><p class="eyebrow">策略快速筛选</p><h1>快速回测与K线</h1></div>
+  <p class="lede">用简化日线、固定股票池和统一成本快速判断方向。这里允许幸存者偏差，只用于淘汰明显无效的策略。</p>
+</section>
+
+{% if not result and unavailable %}
+<div class="backtest-empty">
+  <h2>{{ unavailable.title }}</h2>
+  <p>{{ unavailable.reason }}</p>
+  <a class="secondary-button" href="/questions#question-{{ question.id }}">返回研究问题</a>
+</div>
+{% elif not result %}
+<div class="backtest-empty">
+  <h2>还没有回测结果</h2>
+  <p>将读取近5年公开日线，对当前策略做一个简化的12至2个月动量多空回测，通常十几秒内完成。</p>
+  <form method="post" action="/strategies/{{ question.id }}/backtest/run"><button class="primary-button" type="submit">开始快速回测</button></form>
+  <a class="secondary-button" href="/strategies">返回策略</a>
+</div>
+{% else %}
+<div class="exploratory-warning"><strong>{{ '代理回测，不是策略结论' if result.coverage and not result.coverage.eligible_for_ranking else '探索性回测，不是正式结论' }}</strong><span>{{ '使用流动 ETF 表达资产类别，只检查研究方向。' if result.coverage and result.coverage.mode == 'RESEARCH_PROXY' else '固定当前大盘股样本，暂不严格处理幸存者偏差和历史真实借券数据。' }}</span></div>
+{% if result.coverage %}
+<section class="coverage-card {{ 'proxy' if not result.coverage.eligible_for_ranking }}">
+  <div><small>适配器</small><h2>{{ result.coverage.label }}</h2><p>{{ '代理结果不参与每日最优排名' if not result.coverage.eligible_for_ranking else '探索性结果可参与快速筛选' }}</p></div>
+  <strong>{{ (result.coverage.score * 100)|round|int }}%<small>规则覆盖率</small></strong>
+  <div><small>已实现</small><p>{{ result.coverage.implemented|join('、') }}</p></div>
+  <div><small>仍缺少</small><p>{{ result.coverage.missing|join('、') }}</p></div>
+</section>
+{% endif %}
+<section class="backtest-summary">
+  <div><small>策略</small><h2>{{ result.strategy_name }}</h2><p>{{ result.method }}</p></div>
+  <form method="post" action="/strategies/{{ question.id }}/backtest/run"><button class="secondary-button" type="submit">更新行情并重跑</button></form>
+</section>
+<div class="metric-grid">
+  <div><small>累计收益</small><strong>{{ result.metrics.total_return }}%</strong></div>
+  <div><small>年化收益</small><strong>{{ result.metrics.annual_return }}%</strong></div>
+  <div><small>夏普比率</small><strong>{{ result.metrics.sharpe }}</strong></div>
+  <div><small>最大回撤</small><strong>{{ result.metrics.max_drawdown }}%</strong></div>
+  <div><small>年化波动</small><strong>{{ result.metrics.annual_volatility }}%</strong></div>
+  <div><small>正收益日</small><strong>{{ result.metrics.positive_day_ratio }}%</strong></div>
+</div>
+
+<section class="evaluation-card {{ evaluation.tone }}">
+  <div class="evaluation-verdict"><div><small>QRI 自动评价</small><h2>{{ evaluation.verdict }}</h2></div><span>基于透明门槛 · 不额外调用AI</span></div>
+  <p class="evaluation-summary">{{ evaluation.summary }}</p>
+  <div class="evaluation-columns">
+    <div><h3>判断依据</h3><ul>{% for item in evaluation.evidence %}<li>{{ item }}</li>{% endfor %}</ul></div>
+    <div><h3>下一步怎么改</h3><ol>{% for item in evaluation.next_steps %}<li>{{ item }}</li>{% endfor %}</ol></div>
+  </div>
+  {% if evaluation.tone == 'proxy' %}<div class="reconstruct-action"><div><strong>代理结果不自动调参</strong><span>先补齐缺失数据和原始信号算法；否则反复优化 ETF 代理只会增加过拟合风险。</span></div></div>{% elif evaluation.tone != 'pass' and not result.reconstruction %}<div class="reconstruct-action"><div><strong>不要停在建议上</strong><span>保留本次结果作为基线，生成第二版规则并立即重新回测。</span></div><form method="post" action="/strategies/{{ question.id }}/reconstruct"><button class="primary-button" type="submit">重构并重新回测</button></form></div>{% elif evaluation.tone != 'pass' and result.reconstruction %}<div class="reconstruct-action"><div><strong>重构版仍未通过</strong><span>请结合下方前后对比决定是否淘汰；系统不会反复调参直到偶然通过。</span></div></div>{% endif %}
+</section>
+
+{% if result.reconstruction %}
+<section class="reconstruction-card">
+  <div><small>策略重构 V{{ result.reconstruction.version }}</small><h2>重构前后对比</h2></div>
+  <div class="before-after-grid">
+    <div><small>重构前</small><strong>收益 {{ result.reconstruction.previous_metrics.total_return }}%</strong><span>夏普 {{ result.reconstruction.previous_metrics.sharpe }} · 回撤 {{ result.reconstruction.previous_metrics.max_drawdown }}%</span></div>
+    <div><small>重构后</small><strong>收益 {{ result.metrics.total_return }}%</strong><span>夏普 {{ result.metrics.sharpe }} · 回撤 {{ result.metrics.max_drawdown }}%</span></div>
+  </div>
+  <details><summary>本次修改了什么</summary><ul>{% for item in result.reconstruction.changes %}<li>{{ item }}</li>{% endfor %}</ul></details>
+</section>
+{% endif %}
+
+<section class="chart-card"><div class="chart-head"><div><small>{{ result.period.start }} 至 {{ result.period.end }}</small><h2>策略收益曲线</h2></div><span>绿色：策略　灰色：SPY</span></div><canvas id="equity-chart" height="320"></canvas></section>
+
+<section class="chart-card">
+  <div class="chart-head"><div><small>最近180个交易日 · 月度信号点</small><h2>{{ ticker }} K线与买卖点</h2></div>
+    <form method="get"><label for="ticker">切换股票</label><select id="ticker" name="ticker" onchange="this.form.submit()">{% for symbol in universe %}<option value="{{ symbol }}" {% if symbol == ticker %}selected{% endif %}>{{ symbol }}</option>{% endfor %}</select></form>
+  </div>
+  <canvas id="candle-chart" height="420"></canvas>
+  <div class="chart-legend"><span class="rise-dot">上涨K线</span><span class="fall-dot">下跌K线</span><span>▲ 做多　▼ 做空　× 退出</span></div>
+</section>
+
+<div class="backtest-detail-grid">
+  <section><h3>当前模拟持仓</h3><ul>{% for item in result.current_positions %}<li><strong>{{ item.symbol }}</strong><span>{{ '做多' if item.weight > 0 else '做空' }} · {{ (item.weight * 100)|round|int }}%</span></li>{% endfor %}</ul></section>
+  <section><h3>本次简化边界</h3><ul>{% for item in result.limitations %}<li>{{ item }}</li>{% endfor %}</ul></section>
+</div>
+<div class="strategy-actions"><a class="secondary-button" href="/strategies">返回策略孵化</a></div>
+
+<script>
+const equity = {{ result.equity_curve|tojson }};
+const candles = {{ result.candles[ticker]|tojson }};
+const trades = {{ result.trades|selectattr('symbol', 'equalto', ticker)|list|tojson }};
+
+function canvasSetup(id) {
+  const canvas = document.getElementById(id), ratio = window.devicePixelRatio || 1;
+  const width = canvas.parentElement.clientWidth - 32, height = Number(canvas.getAttribute('height'));
+  canvas.width = width * ratio; canvas.height = height * ratio; canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
+  const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio); return {ctx, width, height};
+}
+function lineChart() {
+  const {ctx, width, height} = canvasSetup('equity-chart'), pad = 42;
+  const values = equity.flatMap(x => [x.strategy, x.benchmark]); const min = Math.min(...values), max = Math.max(...values);
+  const x = i => pad + i * (width - pad * 1.5) / Math.max(equity.length - 1, 1); const y = v => height - pad - (v - min) * (height - pad * 1.5) / Math.max(max - min, 1);
+  ctx.strokeStyle='#dce5e0'; ctx.fillStyle='#69756f'; ctx.font='12px sans-serif';
+  for(let i=0;i<5;i++){const v=min+(max-min)*i/4, py=y(v);ctx.beginPath();ctx.moveTo(pad,py);ctx.lineTo(width-12,py);ctx.stroke();ctx.fillText(v.toFixed(1)+'%',2,py+4)}
+  [['benchmark','#98a39e'],['strategy','#16825d']].forEach(([key,color])=>{ctx.strokeStyle=color;ctx.lineWidth=key==='strategy'?3:2;ctx.beginPath();equity.forEach((p,i)=>i?ctx.lineTo(x(i),y(p[key])):ctx.moveTo(x(i),y(p[key])));ctx.stroke()});
+}
+function candleChart() {
+  const {ctx, width, height} = canvasSetup('candle-chart'), pad = 44, lo=Math.min(...candles.map(x=>x.low)), hi=Math.max(...candles.map(x=>x.high));
+  const step=(width-pad-12)/candles.length, y=v=>height-pad-(v-lo)*(height-pad*1.5)/Math.max(hi-lo,1), byDate=Object.fromEntries(candles.map((p,i)=>[p.date,i]));
+  ctx.strokeStyle='#e0e7e3';ctx.fillStyle='#69756f';ctx.font='12px sans-serif';for(let i=0;i<5;i++){const v=lo+(hi-lo)*i/4,py=y(v);ctx.beginPath();ctx.moveTo(pad,py);ctx.lineTo(width-10,py);ctx.stroke();ctx.fillText(v.toFixed(0),4,py+4)}
+  candles.forEach((p,i)=>{const px=pad+i*step+step/2,color=p.close>=p.open?'#d64b47':'#16825d';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(px,y(p.high));ctx.lineTo(px,y(p.low));ctx.stroke();ctx.fillRect(px-Math.max(step*.32,1),Math.min(y(p.open),y(p.close)),Math.max(step*.64,2),Math.max(Math.abs(y(p.open)-y(p.close)),1))});
+  trades.forEach(t=>{const i=byDate[t.date];if(i===undefined)return;const p=candles[i],px=pad+i*step+step/2;ctx.fillStyle=t.action==='做多'?'#1769aa':t.action==='做空'?'#8a3ffc':'#222';ctx.font='bold 15px sans-serif';ctx.fillText(t.action==='做多'?'▲':t.action==='做空'?'▼':'×',px-5,t.action==='做多'?y(p.low)+18:y(p.high)-8)});
+}
+lineChart(); candleChart();
+</script>
+{% endif %}
+{% endblock %}

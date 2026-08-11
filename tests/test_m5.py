@@ -80,6 +80,7 @@ def comparison_json(claims: list[Claim], invalid_id: int | None = None) -> str:
 def questions_json(claims: list[Claim]) -> str:
     base = {
         "family": "Momentum",
+        "plain_language_question": "扣除真实成本以后，美股动量效应还存在吗？",
         "economic_mechanism": "Investor underreaction and information diffusion",
         "counter_mechanism": "Factor crowding, costs, and regime dependence",
         "supporting_claim_ids": [claims[0].id, claims[1].id],
@@ -97,14 +98,14 @@ def questions_json(claims: list[Claim]) -> str:
             "questions": [
                 {
                     **base,
-                    "question": (
+                    "academic_question": (
                         "In a point-in-time US equity universe after 2010, does 12-1 "
                         "momentum retain positive risk-adjusted returns after costs and delistings?"
                     ),
                 },
                 {
                     **base,
-                    "question": (
+                    "academic_question": (
                         "Does the post-2010 momentum effect weaken during high-crowding "
                         "regimes after controlling for transaction costs?"
                     ),
@@ -133,9 +134,104 @@ async def test_comparison_and_questions_use_known_claim_ids() -> None:
         audits = list(session.scalars(select(AICall).order_by(AICall.id)))
         assert [audit.requested_model for audit in audits] == ["gpt-5.4", "gpt-5.4"]
         assert [audit.prompt_version for audit in audits] == [
-            "multi-paper-comparison-v1",
-            "candidate-question-v1",
+            "multi-paper-comparison-v2",
+            "candidate-question-v2",
         ]
+    finally:
+        session.close()
+
+
+@pytest.mark.asyncio
+async def test_comparison_accepts_two_claimed_papers() -> None:
+    session, papers, claims = setup_claims()
+    try:
+        payload = json.dumps(
+            {
+                "common_findings": [
+                    {
+                        "statement": "Both papers report a momentum result.",
+                        "claim_ids": [claims[0].id, claims[1].id],
+                    }
+                ],
+                "differences": [],
+                "contradictions": [],
+                "sample_differences": [],
+                "universe_differences": [],
+                "signal_differences": [],
+                "cost_assumption_differences": [],
+                "oos_differences": [],
+                "survivorship_differences": [],
+                "possible_explanations": [],
+            }
+        )
+        comparison = await MultiPaperComparisonService(
+            session, FixtureLLMProvider([payload]), "gpt-5.4"
+        ).compare(papers[:2], claims[:2])
+        assert comparison.paper_ids_json == [papers[0].id, papers[1].id]
+    finally:
+        session.close()
+
+
+@pytest.mark.asyncio
+async def test_question_generation_repairs_shared_top_level_scores() -> None:
+    session, papers, claims = setup_claims()
+    try:
+        comparison = await MultiPaperComparisonService(
+            session, FixtureLLMProvider([comparison_json(claims)]), "gpt-5.4"
+        ).compare(papers, claims)
+        payload = json.loads(questions_json(claims))
+        score_fields = (
+            "novelty_score",
+            "testability_score",
+            "data_availability_score",
+            "research_priority_score",
+        )
+        for field in score_fields:
+            payload[field] = payload["questions"][0][field]
+            for question in payload["questions"]:
+                question.pop(field)
+        generated = await CandidateQuestionService(
+            session, FixtureLLMProvider([json.dumps(payload)]), "gpt-5.4"
+        ).generate(comparison, claims)
+        assert len(generated) == 2
+        assert generated[0].research_priority_score == 0.82
+    finally:
+        session.close()
+
+
+def test_question_scope_rejects_non_us_and_options_dependencies() -> None:
+    assert CandidateQuestionService._in_current_scope(
+        "美国小市值股票的收益预测能力是否稳定？"
+    )
+    assert not CandidateQuestionService._in_current_scope(
+        "日本市场与美国市场的收益规律是否相同？"
+    )
+    assert not CandidateQuestionService._in_current_scope(
+        "期权隐含波动率能否预测股票收益？"
+    )
+    assert CandidateQuestionService._sanitize_text("Paper 100 reports a result") == (
+        "证据来源 reports a result"
+    )
+
+
+@pytest.mark.asyncio
+async def test_question_generation_skips_near_duplicates() -> None:
+    session, papers, claims = setup_claims()
+    try:
+        comparison_provider = FixtureLLMProvider([comparison_json(claims)])
+        comparison = await MultiPaperComparisonService(
+            session, comparison_provider, "gpt-5.4"
+        ).compare(papers, claims)
+        first = await CandidateQuestionService(
+            session, FixtureLLMProvider([questions_json(claims)]), "gpt-5.4"
+        ).generate(comparison, claims)
+        repeated = await CandidateQuestionService(
+            session, FixtureLLMProvider([questions_json(claims)]), "gpt-5.4"
+        ).generate(comparison, claims)
+
+        assert len(first) == 2
+        assert repeated == []
+        assert session.scalar(select(func.count()).select_from(ResearchQuestion)) == 2
     finally:
         session.close()
 

@@ -11,8 +11,12 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: SecretStr | None = None
     primary_model: str = "claude-sonnet-4-6"
-    reasoning_model: str = "gpt-5.4"
+    reasoning_model: str = "claude-sonnet-4-6"
+    validation_model: str = "claude-sonnet-4-6"
+    # Legacy only: retained so archived strategy records remain readable.
+    strategy_model: str = "gpt-5.6-sol"
     semantic_scholar_api_key: SecretStr | None = None
+    openalex_api_key: SecretStr | None = None
     unpaywall_email: str | None = None
     http_timeout_seconds: float = 20.0
     http_max_retries: int = 3

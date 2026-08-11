@@ -116,9 +116,11 @@ async def test_questions_show_review_status_and_scores(tmp_path: Path) -> None:
         response = await client.get("/questions")
         assert response.status_code == 200
         assert "RQ-MOMENTUM-0001" in response.text
-        assert "HUMAN_REVIEW_REQUIRED" in response.text
-        assert "Testability" in response.text
-        assert "0.90" in response.text
+        assert "等待人工审核" in response.text
+        assert "生成研究验证方案" in response.text
+        assert "Research Validation Spec" in response.text
+        assert "生成策略并回测" not in response.text
+        assert "Sharpe" not in response.text
 
 
 @pytest.mark.asyncio
@@ -131,3 +133,15 @@ async def test_root_redirect_and_missing_paper(tmp_path: Path) -> None:
         assert response.status_code == 303
         assert response.headers["location"] == "/papers"
         assert (await client.get("/papers/999999")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_legacy_strategy_mutations_are_closed(tmp_path: Path) -> None:
+    app, _, _ = app_with_data(tmp_path)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        strategies = await client.get("/strategies", follow_redirects=False)
+        assert strategies.status_code == 303
+        assert strategies.headers["location"] == "/legacy-strategies"
+        assert (await client.post("/questions/1/incubate")).status_code == 410

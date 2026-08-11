@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}运行概览{% endblock %}
+{% block content %}
+<section class="page-heading dashboard-heading">
+  <div><p class="eyebrow">每日论文情报任务</p><h1>运行概览</h1></div>
+  <div class="schedule-badge {{ '' if schedule_enabled else 'inactive' }}"><span class="live-dot"></span><div><strong>{{ '定时任务已启用' if schedule_enabled else '定时任务未启用' }}</strong><small>{{ '下次：' ~ schedule_next_label if schedule_enabled else '需要手动启动' }} · 目标 {{ daily_target }} 篇</small></div></div>
+</section>
+
+<section class="daily-panel">
+  <div><p class="eyebrow">今日采集进度</p><div class="daily-number"><strong>{{ stats.papers_today }}</strong><span>/ {{ daily_target }} 篇</span></div><span class="daily-state {{ daily_task_state }}">{{ daily_task_state_label }}</span></div>
+  <div class="progress-block">
+    <div class="progress-label"><span>完成度</span><strong>{{ daily_progress }}%</strong></div>
+    <div class="progress-track"><span style="width: {{ daily_progress }}%"></span></div>
+    <small>只统计今日首次登记的新论文；重复论文会自动合并，不计入新增数量。</small>
+  </div>
+</section>
+
+<section class="task-center" id="task-center">
+  <div class="task-center-head">
+    <div><p class="eyebrow">QRI 内置任务</p><h2>每日论文筛选任务</h2><p>{{ '下次自动运行：' ~ schedule_next_label if schedule_enabled else '当前没有检测到自动任务' }}。也可以手动补跑，页面刷新后可查看当前阶段。</p></div>
+    <form method="post" action="{{ '/funnel/resume' if funnel_can_resume else '/funnel/run' }}">
+      <button class="primary-button" type="submit" {% if funnel_run and funnel_run.status == 'RUNNING' and not funnel_is_stale %}disabled{% endif %}>
+        {{ '重试未完成步骤' if funnel_run and funnel_run.status == 'FAILED' else '继续运行' if funnel_is_stale else '正在运行' if funnel_run and funnel_run.status == 'RUNNING' else '补跑今日任务' if daily_task_state == 'missed' else '立即运行一次' }}
+      </button>
+    </form>
+  </div>
+      <div class="model-policy"><span>日常分析 <strong>{{ daily_model }}</strong></span><span>问题生成 <strong>{{ question_model }}</strong></span><span>验证方案 <strong>{{ validation_model }}</strong></span></div>
+  {% if funnel_run and funnel_run.status == 'RUNNING' and not funnel_is_stale %}<div class="auto-refresh-note"><span class="live-dot"></span><span>正在后台处理，每 8 秒自动更新 · 最近更新 {{ dashboard_updated_at.strftime('%H:%M:%S') }}</span></div>{% endif %}
+  {% if funnel_message == 'started' %}<div class="task-message success">任务已启动，稍后刷新即可看到各阶段进度。</div>{% endif %}
+  {% if funnel_message == 'running' %}<div class="task-message">已有任务正在运行，没有重复启动。</div>{% endif %}
+  {% if funnel_message == 'resumed' %}<div class="task-message success">已从上次中断的阶段继续运行，已完成阶段不会重复执行。</div>{% endif %}
+  {% if funnel_is_stale %}<div class="task-message">检测到后台任务已经中断。点击“继续运行”将从当前阶段恢复。</div>{% endif %}
+  {% if funnel_run and funnel_run.status == 'FAILED' %}<div class="task-message">上次运行有步骤未完成。点击“重试未完成步骤”，已完成的数据不会重复处理。</div>{% endif %}
+  {% if funnel_run and not funnel_is_today %}<div class="task-message"><strong>今日任务未运行。</strong> 下方是 {{ funnel_run.started_at|local_datetime_zh }} 启动的上一批结果；{{ '下一次将在' ~ schedule_next_label ~ '自动执行，也可以现在补跑。' if schedule_enabled else '可以点击按钮立即补跑。' }}</div>{% endif %}
+  {% if funnel_run %}
+  <div class="task-run-summary">
+    <div><span>{{ '今日状态' if funnel_is_today else '最近一批' }}</span><strong class="run-status {{ funnel_run.status|lower }}">{{ '已完成' if funnel_run.status == 'COMPLETE' else '运行中' if funnel_run.status == 'RUNNING' else '失败' }}</strong></div>
+    <div><span>开始时间（北京时间）</span><strong>{{ funnel_run.started_at|local_datetime('%m-%d %H:%M') }}</strong></div>
+    <div><span>新增论文</span><strong>{{ funnel_live_counts.papers }}</strong></div>
+    <div><span>研究卡</span><strong>{{ funnel_live_counts.cards }}</strong></div>
+    <div><span>新问题</span><strong>{{ funnel_live_counts.questions }}</strong></div>
+    <div><span>模型调用</span><strong>{{ funnel_live_counts.ai_calls }}</strong></div>
+  </div>
+  {% else %}
+  <div class="task-empty">尚未运行完整漏斗。点击“立即运行一次”，本次结果会留在这里。</div>
+  {% endif %}
+  <div class="task-stage-list">
+    {% for stage in funnel_stages %}
+    <div class="task-stage {{ stage.row.status|lower if stage.row else 'pending' }}">
+      <span class="stage-index">{{ loop.index }}</span>
+      <div><strong>{{ stage.label }}</strong><small>{% if stage.row and stage.row.status == 'SUCCESS' %}本次新增 {{ stage.row.metrics_json.get('created', 0) }}{% elif stage.row and stage.row.status == 'RUNNING' %}正在处理…{% elif stage.row and stage.row.status == 'FAILED' %}执行失败，可查看最近运行记录{% else %}等待执行{% endif %}</small></div>
+      <span class="stage-state">{{ '完成' if stage.row and stage.row.status == 'SUCCESS' else '运行中' if stage.row and stage.row.status == 'RUNNING' else '失败' if stage.row and stage.row.status == 'FAILED' else '等待' }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{% if funnel_run and funnel_run.status == 'RUNNING' and not funnel_is_stale %}
+<script>
+  window.setTimeout(function () {
+    window.location.replace('/dashboard#task-center');
+  }, 8000);
+</script>
+{% endif %}
+
+{% if daily_best %}
+{% set champion = daily_best.question %}
+<section class="daily-best-panel" id="daily-best">
+  <div class="daily-best-head"><div><p class="eyebrow">每日最值得研究</p><h2>{{ daily_best.date.isoformat() }} 研究优先候选</h2><p>只依据研究价值、证据质量、冲突度和可证伪性排名，不读取回测收益。</p></div><span class="daily-best-badge">{{ '今日精选' if daily_best_is_today else '最近一期' }}</span></div>
+  <div class="daily-best-main">
+    <div class="daily-best-copy"><small>{{ champion.question_uid }}</small><h3>{{ champion.plain_language_question or (daily_best.translation.question_zh if daily_best.translation else champion.question) }}</h3><div class="daily-best-scores"><span>综合 {{ '%.0f'|format(daily_best.score * 100) }}</span><span>证据质量 {{ '%.0f'|format(daily_best.merit.evidence_quality * 100) }}</span><span>冲突度 {{ '%.0f'|format(daily_best.merit.evidence_conflict * 100) }}</span><span>可证伪性 {{ '%.0f'|format(daily_best.merit.falsifiability * 100) }}</span><span>可检验性 {{ '%.0f'|format(daily_best.merit.testability * 100) }}</span></div></div>
+    <div class="daily-best-backtest pending"><small>下一步</small><strong>研究验证方案</strong><p>定义变量、PIT、统计检验、OOS 与失败条件，再交由人工审核。</p><form method="post" action="/questions/{{ champion.id }}/validation-spec"><button class="primary-button" type="submit">生成验证方案</button></form></div>
+  </div>
+  <details class="daily-best-history"><summary>最近7天每日最值得研究（{{ daily_best_history|length }}）</summary><div>{% for item in daily_best_history %}<a href="/questions#question-{{ item.question.id }}"><time>{{ item.date.strftime('%m-%d') }}</time><span>{{ item.question.plain_language_question or (item.translation.question_zh if item.translation else item.question.question) }}</span><b>研究分 {{ '%.0f'|format(item.score * 100) }}</b></a>{% endfor %}</div></details>
+  <div class="daily-best-archive-link"><a class="secondary-button" href="/daily-best">检索全部每日研究归档</a></div>
+</section>
+{% endif %}
+
+<section class="funnel-panel">
+  <div class="section-title"><div><p class="eyebrow">每天如何筛选</p><h2>100 篇不是全部深度分析</h2></div><span>费用受控</span></div>
+  <div class="funnel-flow">
+    <div class="funnel-step"><strong>100</strong><span>论文元数据</span><small>公开接口采集、去重</small></div>
+    <i>→</i>
+    <div class="funnel-step"><strong>10</strong><span>美股范围与摘要初筛</span><small>纯期权及范围外论文自动归档</small></div>
+    <i>→</i>
+    <div class="funnel-step"><strong>3</strong><span>全文与研究卡</span><small>只分析合法开放 PDF</small></div>
+    <i>→</i>
+    <div class="funnel-step"><strong>3</strong><span>主张与原文证据</span><small>结论必须能回到原文</small></div>
+    <i>→</i>
+    <div class="funnel-step highlight"><strong>1–3</strong><span>候选研究问题</span><small>自动去重、排名、可归档</small></div>
+  </div>
+</section>
+
+<section class="metric-grid">
+  <a class="metric-card" href="/papers"><span>论文总量</span><strong>{{ stats.papers }}</strong><small>去重后的论文档案</small></a>
+  <a class="metric-card" href="/papers"><span>可用全文</span><strong>{{ stats.fulltexts }}</strong><small>已下载并解析 PDF</small></a>
+  <a class="metric-card" href="/papers"><span>研究卡片</span><strong>{{ stats.cards }}</strong><small>结构化论文分析</small></a>
+  <a class="metric-card" href="/claims"><span>作者主张</span><strong>{{ stats.claims }}</strong><small>带原文证据的主张</small></a>
+  <a class="metric-card" href="/questions"><span>研究问题</span><strong>{{ stats.questions }}</strong><small>等待人工审核</small></a>
+</section>
+
+<section>
+  <div class="section-title"><h2>最近运行记录</h2><span>{{ recent_runs|length }} 条</span></div>
+  {% if recent_runs %}
+  <div class="table-wrap run-table"><table>
+    <thead><tr><th>开始时间</th><th>任务</th><th>状态</th><th>发现</th><th>去重</th><th>全文</th><th>问题</th></tr></thead>
+    <tbody>{% for run in recent_runs %}<tr>
+      <td>{{ run.started_at|local_datetime('%m-%d %H:%M') }}</td>
+      <td><strong>{{ '每日采集' if run.run_type == 'DAILY_DISCOVERY' else '每日筛选漏斗' if run.run_type == 'DAILY_FUNNEL' else '完整研究流水线' if run.run_type == 'END_TO_END' else '阶段任务' }}</strong><small class="subline">{{ run.query }}</small></td>
+      <td><span class="run-status {{ run.status|lower }}">{{ '已完成' if run.status == 'COMPLETE' else '运行中' if run.status == 'RUNNING' else '失败' }}</span></td>
+      <td>{{ run.discovered_count }}</td><td>{{ run.deduplicated_count }}</td><td>{{ run.fulltext_success_count }}</td><td>{{ run.question_count }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="empty compact"><p>尚无运行记录。</p></div>{% endif %}
+</section>
+
+<section class="safety-note"><strong>费用保护</strong><p>每天采集 100 篇，先用不调用 AI 的规则分成美股核心、辅助信号、范围外和人工复核；只有核心与辅助论文进入最多 10 篇中文摘要和 3 篇全文深析。正常上限约 18 次模型调用，没有合格候选时自动减少或跳过。</p></section>
+{% endblock %}

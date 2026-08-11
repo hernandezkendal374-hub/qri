@@ -14,7 +14,9 @@ class ArxivProvider(HTTPPaperProvider, PaperProvider):
 
     async def search(self, query: str, *, limit: int = 20) -> list[ProviderPaper]:
         terms = [term for term in re.findall(r"[A-Za-z0-9-]+", query) if len(term) > 1]
-        search_query = " AND ".join(f"all:{term}" for term in terms)
+        keywords = " AND ".join(f"all:{term}" for term in terms)
+        finance_categories = "(cat:q-fin.* OR cat:econ.EM OR cat:stat.ML)"
+        search_query = f"{finance_categories} AND ({keywords})"
         response = await self.request(
             self.endpoint,
             params={

@@ -3,25 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}QRI{% endblock %} · Quant Research Intelligence</title>
+  <title>{% block title %}QRI{% endblock %} · 量化论文情报系统</title>
   <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="/papers" aria-label="QRI 首页">
+    <a class="brand" href="/dashboard" aria-label="QRI 首页">
       <span class="brand-mark">Q</span>
-      <span><strong>QRI</strong><small>Quant Research Intelligence</small></span>
+      <span><strong>QRI</strong><small>量化论文情报与研究问题生成系统</small></span>
     </a>
     <nav aria-label="主导航">
-      <a href="/papers" class="{% if active == 'papers' %}active{% endif %}">Papers</a>
-      <a href="/claims" class="{% if active == 'claims' %}active{% endif %}">Claims</a>
-      <a href="/questions" class="{% if active == 'questions' %}active{% endif %}">Research Questions</a>
+      <a href="/dashboard" class="{% if active == 'dashboard' %}active{% endif %}">运行概览</a>
+      <a href="/papers" class="{% if active == 'papers' %}active{% endif %}">论文库</a>
+      <a href="/claims" class="{% if active == 'claims' %}active{% endif %}">作者主张</a>
+      <a href="/questions" class="{% if active == 'questions' %}active{% endif %}">研究问题</a>
+      <a href="/daily-best" class="{% if active == 'daily_best' %}active{% endif %}">每日最值得研究</a>
     </nav>
   </header>
   <main class="page-shell">
     {% block content %}{% endblock %}
   </main>
-  <footer>Evidence &gt; Summary · Question &gt; Conclusion · Human Approval &gt; Automation</footer>
+  <footer>原文证据优先于摘要 · 研究问题不等于结论 · 自动化必须经过人工审核</footer>
 </body>
 </html>
-

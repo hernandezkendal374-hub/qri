@@ -141,7 +141,10 @@ class DynamicFixtureLLM(LLMProvider):
                     "questions": [
                         {
                             "family": "Momentum",
-                            "question": (
+                            "plain_language_question": (
+                                "After real costs, does US stock momentum still work?"
+                            ),
+                            "academic_question": (
                                 "After 2010, does point-in-time US equity momentum remain "
                                 "positive after costs and delisting returns?"
                             ),

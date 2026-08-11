@@ -30,4 +30,6 @@ def test_all_tables_create_in_sqlite() -> None:
 def test_settings_do_not_require_secrets() -> None:
     settings = Settings(_env_file=None)
     assert settings.primary_model == "claude-sonnet-4-6"
+    assert settings.reasoning_model == "claude-sonnet-4-6"
+    assert settings.strategy_model == "gpt-5.6-sol"
     assert settings.llm_api_key is None
