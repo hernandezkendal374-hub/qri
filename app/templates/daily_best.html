@@ -1,19 +1,17 @@
 {% extends "base.html" %}
-{% block title %}每日最值得研究{% endblock %}
+{% block title %}Research Brief 归档{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">研究价值归档</p><h1>每日最值得研究</h1></div><p class="lede">按新颖度、证据质量、证据冲突、可证伪性、可检验性和数据可得性排名；不使用策略收益或回撤。</p></section>
-
-<form class="best-search" method="get" action="/daily-best"><label for="best-query">检索历史研究问题</label><div><input id="best-query" name="q" value="{{ query }}" placeholder="输入日期、问题编号或关键词"><button class="primary-button" type="submit">检索</button>{% if query %}<a class="secondary-button" href="/daily-best">清除</a>{% endif %}</div><small>找到 {{ result_count }} 个候选，分布于 {{ archive_groups|length }} 个日期。</small></form>
-
+<section class="page-heading"><div><p class="eyebrow">深度研究出口</p><h1>Research Brief 归档</h1></div><p class="lede">这里只保存完成证据链与验证设计的高价值研究，不保存被雷达淘汰的普通候选。</p></section>
+<form class="best-search" method="get" action="/daily-best"><label for="best-query">检索历史 Research Brief</label><div><input id="best-query" name="q" value="{{ query }}" placeholder="日期、问题编号或关键词"><button class="primary-button" type="submit">检索</button>{% if query %}<a class="secondary-button" href="/daily-best">清除</a>{% endif %}</div><small>共 {{ result_count }} 份，分布在 {{ archive_groups|length }} 个日期。</small></form>
 {% for group in archive_groups %}
 {% set best = group.best %}
 <section class="best-day-card" id="best-{{ group.date.isoformat() }}">
-  <div class="best-day-head"><div><small>当日最值得研究</small><h2>{{ group.date.isoformat() }}</h2></div><span>{{ group.candidates|length }} 个候选</span></div>
+  <div class="best-day-head"><div><small>当日最值得研究</small><h2>{{ group.date.isoformat() }}</h2></div><span>{{ group.candidates|length }} 份 Brief</span></div>
   <article class="best-winner">
-    <div><span class="question-id">{{ best.question.question_uid }}</span><h3>{{ best.question.plain_language_question or (best.translation.question_zh if best.translation else best.question.question) }}</h3><div class="daily-best-scores"><span>综合 {{ '%.0f'|format(best.score * 100) }}</span><span>新颖度 {{ '%.0f'|format(best.merit.novelty * 100) }}</span><span>证据质量 {{ '%.0f'|format(best.merit.evidence_quality * 100) }}</span><span>冲突度 {{ '%.0f'|format(best.merit.evidence_conflict * 100) }}</span><span>可证伪性 {{ '%.0f'|format(best.merit.falsifiability * 100) }}</span><span>可检验性 {{ '%.0f'|format(best.merit.testability * 100) }}</span><span>数据可得性 {{ '%.0f'|format(best.merit.data_availability * 100) }}</span></div></div>
-    <div class="winner-result"><small>研究状态</small><strong>{{ '验证方案已导出' if best.validation and best.validation.review_status == 'EXPORTED' else '人工审核已通过' if best.validation and best.validation.review_status == 'APPROVED' else '验证方案待审核' if best.validation else '待生成验证方案' }}</strong><a class="primary-button" href="/questions#question-{{ best.question.id }}">进入研究问题</a></div>
+    <div><span class="question-id">{{ best.question.question_uid }}</span><h3>{{ best.question.plain_language_question or best.question.question }}</h3><div class="daily-best-scores"><span>综合 {{ '%.0f'|format(best.score * 100) }}</span><span>新颖 {{ '%.0f'|format(best.merit.novelty * 100) }}</span><span>证据 {{ '%.0f'|format(best.merit.evidence_quality * 100) }}</span><span>冲突 {{ '%.0f'|format(best.merit.evidence_conflict * 100) }}</span><span>可证伪 {{ '%.0f'|format(best.merit.falsifiability * 100) }}</span><span>可检验 {{ '%.0f'|format(best.merit.testability * 100) }}</span></div></div>
+    <div class="winner-result"><small>出口决策</small><strong>{{ '已导出' if best.validation.review_status == 'EXPORTED' else '批准进入 Quant System' if best.validation.review_status == 'APPROVED' else '暂缓研究' if best.validation.review_status == 'DEFERRED' else '已拒绝' if best.validation.review_status == 'REJECTED' else '等待决策' }}</strong><a class="primary-button" href="/questions#question-{{ best.question.id }}">查看完整 Brief</a></div>
   </article>
-  <details class="all-day-candidates"><summary>查看当天全部候选（{{ group.candidates|length }}）</summary><div>{% for item in group.candidates %}<a href="/questions#question-{{ item.question.id }}"><span><small>#{{ loop.index }} · {{ item.question.question_uid }}</small><strong>{{ item.question.plain_language_question or (item.translation.question_zh if item.translation else item.question.question) }}</strong></span><b>研究分 {{ '%.0f'|format(item.score * 100) }}</b></a>{% endfor %}</div></details>
+  <details class="all-day-candidates"><summary>查看当天全部 Brief（{{ group.candidates|length }}）</summary><div>{% for item in group.candidates %}<a href="/questions#question-{{ item.question.id }}"><span><small>#{{ loop.index }} · {{ item.question.question_uid }}</small><strong>{{ item.question.plain_language_question or item.question.question }}</strong></span><b>研究分 {{ '%.0f'|format(item.score * 100) }}</b></a>{% endfor %}</div></details>
 </section>
-{% else %}<div class="empty"><h2>{{ '没有匹配结果' if query else '尚无每日研究归档' }}</h2><p>{{ '换一个关键词，或清除搜索条件。' if query else '每日生成候选研究问题后，会自动按日期出现在这里。' }}</p></div>{% endfor %}
+{% else %}<div class="empty"><h2>{{ '没有匹配结果' if query else '尚无高价值 Research Brief' }}</h2><p>没有达到阈值时，系统不会为了填满日报而生成内容。</p></div>{% endfor %}
 {% endblock %}

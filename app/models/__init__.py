@@ -13,8 +13,10 @@ from app.models.entities import (
     PipelineStageRun,
     QuestionStatus,
     QuestionTranslation,
+    RadarAssessment,
     ResearchCard,
     ResearchQuestion,
+    ResearchTheme,
     ResearchValidationSpec,
     StrategyIncubation,
 )
@@ -34,8 +36,10 @@ __all__ = [
     "PipelineStageRun",
     "QuestionStatus",
     "QuestionTranslation",
+    "RadarAssessment",
     "ResearchCard",
     "ResearchQuestion",
+    "ResearchTheme",
     "ResearchValidationSpec",
     "StrategyIncubation",
 ]

@@ -21,12 +21,15 @@ from app.models import (
     AbstractBrief,
     Claim,
     Document,
+    Evidence,
     Paper,
     PaperComparison,
     PipelineRun,
     QuestionTranslation,
+    RadarAssessment,
     ResearchCard,
     ResearchQuestion,
+    ResearchValidationSpec,
 )
 from app.models.entities import FullTextStatus
 from app.parsing.pymupdf_parser import PyMuPDFParser
@@ -39,6 +42,8 @@ from app.providers.papers.semantic_scholar import SemanticScholarProvider
 from app.providers.papers.unpaywall import UnpaywallProvider
 from app.question_factory.service import CandidateQuestionService
 from app.question_factory.translation import QuestionTranslationService
+from app.radar import RadarService
+from app.research_validation import ResearchValidationService
 from app.scope.us_equity import (
     ELIGIBLE_SCOPES,
     SCOPE_VERSION,
@@ -63,7 +68,7 @@ DAILY_QUERIES = (
 )
 
 
-def _uncompared_claimed_paper_ids(session, limit: int = 1) -> list[int]:
+def _uncompared_claimed_paper_ids(session, limit: int = 3) -> list[int]:
     compared_ids = {
         paper_id
         for paper_ids in session.scalars(select(PaperComparison.paper_ids_json))
@@ -72,7 +77,11 @@ def _uncompared_claimed_paper_ids(session, limit: int = 1) -> list[int]:
     statement = (
         select(Paper.id)
         .join(Claim, Claim.paper_id == Paper.id)
-        .where(Paper.research_scope == US_EQUITY_CORE)
+        .join(RadarAssessment, RadarAssessment.paper_id == Paper.id)
+        .where(
+            Paper.research_scope == US_EQUITY_CORE,
+            RadarAssessment.decision == "DEEP",
+        )
         .group_by(Paper.id)
         .order_by(Paper.citation_count.desc().nullslast(), Paper.id.desc())
         .limit(limit)
@@ -139,7 +148,7 @@ def search(query: str, limit: int = typer.Option(20, min=1, max=100)) -> None:
 
 
 @app.command()
-def daily(target: int = typer.Option(100, min=1, max=100)) -> None:
+def daily(target: int = typer.Option(300, min=1, max=500)) -> None:
     """Collect TARGET new papers with rotating queries and no paid LLM analysis."""
     settings = get_settings()
     key = settings.semantic_scholar_api_key
@@ -206,12 +215,34 @@ def daily(target: int = typer.Option(100, min=1, max=100)) -> None:
         session.add(run)
         session.commit()
         typer.echo(
-            f"Daily collection complete: {registered_count} processed, "
-            f"{new_count}/{target} new"
+            f"Daily collection complete: {registered_count} processed, {new_count}/{target} new"
         )
         typer.echo(f"Queries: {' | '.join(used_queries)}")
         for source, error in errors.items():
             typer.echo(f"Warning {source}: {error}", err=True)
+
+
+@app.command("radar")
+def radar(scout: int = typer.Option(20, min=1, max=100)) -> None:
+    """Cheap metadata-and-abstract triage; archive most papers without deep analysis."""
+    Base.metadata.create_all(engine)
+    with SessionLocal() as session:
+        rows = RadarService(session).assess(scout_limit=scout)
+        selected = sum(row.decision == "SCOUT" for row in rows)
+        conflicts = sum(row.change_type == "CONFLICT" for row in rows)
+        typer.echo(
+            f"Radar assessed: {len(rows)}; scout: {selected}; "
+            f"archived: {len(rows) - selected}; conflicts: {conflicts}"
+        )
+
+
+@app.command("prioritize")
+def prioritize(deep: int = typer.Option(3, min=1, max=3)) -> None:
+    """Promote at most three scouted papers to evidence-grade deep research."""
+    Base.metadata.create_all(engine)
+    with SessionLocal() as session:
+        selected = RadarService(session).prioritize(deep_limit=deep)
+        typer.echo(f"Deep research selected: {len(selected)}")
 
 
 @app.command("daily-funnel")
@@ -271,7 +302,9 @@ def fetch(top: int = typer.Option(3, min=1, max=20)) -> None:
             retry_before = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)
             papers = session.scalars(
                 select(Paper)
+                .join(RadarAssessment, RadarAssessment.paper_id == Paper.id)
                 .where(
+                    RadarAssessment.decision == "DEEP",
                     Paper.research_scope.in_(ELIGIBLE_SCOPES),
                     Paper.fulltext_status != FullTextStatus.FULLTEXT_AVAILABLE,
                     or_(
@@ -284,7 +317,7 @@ def fetch(top: int = typer.Option(3, min=1, max=20)) -> None:
                         Paper.doi.is_not(None),
                     ),
                 )
-                .order_by(Paper.citation_count.desc().nullslast(), Paper.id)
+                .order_by(RadarAssessment.radar_score.desc(), Paper.id)
             ).all()
             service = FullTextService(
                 session,
@@ -367,13 +400,15 @@ def briefs(top: int = typer.Option(10, min=1, max=100)) -> None:
             papers = list(
                 session.scalars(
                     select(Paper)
+                    .join(RadarAssessment, RadarAssessment.paper_id == Paper.id)
                     .where(
+                        RadarAssessment.decision == "SCOUT",
                         Paper.abstract.is_not(None),
                         Paper.research_scope.in_(ELIGIBLE_SCOPES),
                         ~exists(select(AbstractBrief.id).where(AbstractBrief.paper_id == Paper.id)),
                         ~exists(select(ResearchCard.id).where(ResearchCard.paper_id == Paper.id)),
                     )
-                    .order_by(Paper.citation_count.desc().nullslast(), Paper.id)
+                    .order_by(RadarAssessment.radar_score.desc(), Paper.id)
                     .limit(top)
                 )
             )
@@ -431,13 +466,15 @@ def analyze(top: int = typer.Option(3, min=1, max=20)) -> None:
             rows = session.execute(
                 select(Paper, Document)
                 .join(Document, Document.paper_id == Paper.id)
+                .join(RadarAssessment, RadarAssessment.paper_id == Paper.id)
                 .where(
+                    RadarAssessment.decision == "DEEP",
                     Paper.research_scope.in_(ELIGIBLE_SCOPES),
                     Paper.fulltext_status == FullTextStatus.FULLTEXT_AVAILABLE,
                     Document.document_type == "PDF",
                     ~exists(select(ResearchCard.id).where(ResearchCard.paper_id == Paper.id)),
                 )
-                .order_by(Paper.id)
+                .order_by(RadarAssessment.radar_score.desc(), Paper.id)
                 .limit(top)
             ).all()
             pipeline = PipelineRun(query=f"[RESEARCH_CARD] top={top}")
@@ -488,11 +525,13 @@ def claims(top: int = typer.Option(3, min=1, max=20)) -> None:
                 select(Paper, Document, ResearchCard)
                 .join(Document, Document.paper_id == Paper.id)
                 .join(ResearchCard, ResearchCard.paper_id == Paper.id)
+                .join(RadarAssessment, RadarAssessment.paper_id == Paper.id)
                 .where(
+                    RadarAssessment.decision == "DEEP",
                     Document.document_type == "PDF",
                     ~exists(select(Claim.id).where(Claim.paper_id == Paper.id)),
                 )
-                .order_by(Paper.id)
+                .order_by(RadarAssessment.radar_score.desc(), Paper.id)
                 .limit(top)
             ).all()
             pipeline = PipelineRun(query=f"[CLAIM_EVIDENCE] top={top}")
@@ -588,6 +627,98 @@ def questions() -> None:
                 typer.echo("No new questions: generated candidates matched existing questions.")
             for question in generated:
                 typer.echo(f"{question.question_uid} [{question.status.value}] {question.question}")
+
+    asyncio.run(run())
+
+
+@app.command("validation-briefs")
+def validation_briefs(top: int = typer.Option(3, min=1, max=3)) -> None:
+    """Automatically complete Research Briefs for only the highest-value deep questions."""
+    settings = get_settings()
+    if not settings.llm_base_url or not settings.llm_api_key:
+        typer.echo("LLM is not configured.", err=True)
+        raise typer.Exit(code=2)
+    provider = OpenAICompatibleProvider(
+        settings.llm_base_url,
+        settings.llm_api_key.get_secret_value(),
+        timeout=max(settings.http_timeout_seconds, 600.0),
+    )
+
+    async def run() -> None:
+        with SessionLocal() as session:
+            candidates = list(
+                session.scalars(
+                    select(ResearchQuestion)
+                    .where(
+                        ~exists(
+                            select(ResearchValidationSpec.id).where(
+                                ResearchValidationSpec.question_id == ResearchQuestion.id
+                            )
+                        )
+                    )
+                    .order_by(
+                        ResearchQuestion.research_priority_score.desc().nullslast(),
+                        ResearchQuestion.id.desc(),
+                    )
+                    .limit(50)
+                )
+            )
+            completed = 0
+            for question in candidates:
+                if completed >= top:
+                    break
+                claim_ids = list(question.supporting_claims_json or []) + list(
+                    question.contradicting_claims_json or []
+                )
+                has_deep_source = bool(
+                    claim_ids
+                    and session.scalar(
+                        select(func.count())
+                        .select_from(Claim)
+                        .join(RadarAssessment, RadarAssessment.paper_id == Claim.paper_id)
+                        .where(
+                            Claim.id.in_(claim_ids),
+                            RadarAssessment.decision == "DEEP",
+                        )
+                    )
+                )
+                if not has_deep_source:
+                    continue
+                claims = (
+                    list(session.scalars(select(Claim).where(Claim.id.in_(claim_ids))))
+                    if claim_ids
+                    else []
+                )
+                evidence = (
+                    list(session.scalars(select(Evidence).where(Evidence.claim_id.in_(claim_ids))))
+                    if claim_ids
+                    else []
+                )
+                package = {
+                    "question": {
+                        "id": question.id,
+                        "plain_language": question.plain_language_question,
+                        "academic": question.academic_question or question.question,
+                        "economic_mechanism": question.economic_mechanism,
+                        "counter_mechanism": question.counter_mechanism,
+                        "required_data": question.required_data_json,
+                        "known_risks": question.known_risks_json,
+                    },
+                    "claims": [
+                        {"id": claim.id, "paper_id": claim.paper_id, "text": claim.claim_text}
+                        for claim in claims
+                    ],
+                    "evidence": [
+                        {"claim_id": item.claim_id, "source_text": item.source_text}
+                        for item in evidence
+                    ],
+                }
+                await ResearchValidationService(
+                    session, provider, settings.validation_model
+                ).generate(question, package)
+                completed += 1
+            RadarService(session).refresh_theme_counts()
+            typer.echo(f"Research Briefs completed: {completed}/{len(candidates)}")
 
     asyncio.run(run())
 

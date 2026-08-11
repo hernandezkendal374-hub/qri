@@ -37,6 +37,7 @@ class QuestionStatus(StrEnum):
     AI_REVIEWED = "AI_REVIEWED"
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
     HUMAN_APPROVED = "HUMAN_APPROVED"
+    DEFERRED = "DEFERRED"
     REJECTED = "REJECTED"
     EXPORTED = "EXPORTED"
 
@@ -79,6 +80,37 @@ class Paper(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     sources: Mapped[list["PaperSource"]] = relationship(cascade="all, delete-orphan")
+
+
+class ResearchTheme(Base):
+    __tablename__ = "research_themes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    theme_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    name_zh: Mapped[str] = mapped_column(String(255))
+    name_en: Mapped[str] = mapped_column(String(255))
+    summary: Mapped[str | None] = mapped_column(Text)
+    paper_count: Mapped[int] = mapped_column(Integer, default=0)
+    claim_count: Mapped[int] = mapped_column(Integer, default=0)
+    conflict_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_changed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class RadarAssessment(Base):
+    __tablename__ = "radar_assessments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id"), unique=True, index=True)
+    theme_id: Mapped[int] = mapped_column(ForeignKey("research_themes.id"), index=True)
+    decision: Mapped[str] = mapped_column(String(32), default="ARCHIVED", index=True)
+    change_type: Mapped[str] = mapped_column(String(32), default="NO_CHANGE", index=True)
+    relevance_score: Mapped[float] = mapped_column(Float, default=0.0)
+    novelty_score: Mapped[float] = mapped_column(Float, default=0.0)
+    conflict_score: Mapped[float] = mapped_column(Float, default=0.0)
+    evidence_potential_score: Mapped[float] = mapped_column(Float, default=0.0)
+    radar_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    reason: Mapped[str] = mapped_column(Text)
+    assessed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class PaperVersion(Base):

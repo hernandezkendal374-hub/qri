@@ -38,7 +38,7 @@ def test_daily_funnel_tracks_stages_and_prevents_concurrent_runs(monkeypatch) ->
         assert completed.status == "COMPLETE"
         assert completed.current_stage is None
         assert completed.error_count == 0
-        assert len(stages) == 6
+        assert len(stages) == 9
         assert all(stage.status == "SUCCESS" for stage in stages)
         assert all(stage.attempt_count == 1 for stage in stages)
 
@@ -80,6 +80,6 @@ def test_interrupted_funnel_resumes_without_repeating_completed_stages(monkeypat
                 .order_by(PipelineStageRun.id)
             )
         )
-        assert len(calls) == 4
-        assert [stage.attempt_count for stage in stages] == [1, 1, 1, 1, 1, 1]
+        assert len(calls) == 7
+        assert [stage.attempt_count for stage in stages] == [1] * 9
         assert all(stage.status == "SUCCESS" for stage in stages)

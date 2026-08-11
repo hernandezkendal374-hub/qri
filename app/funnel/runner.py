@@ -16,19 +16,29 @@ from app.models import (
     Paper,
     PipelineRun,
     PipelineStageRun,
+    RadarAssessment,
     ResearchCard,
     ResearchQuestion,
+    ResearchValidationSpec,
 )
 from app.models.entities import FullTextStatus
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FUNNEL_STAGES = (
-    ("DISCOVERY", "采集并去重 100 篇", ("daily", "--target", "100"), Paper),
-    ("ABSTRACT_BRIEF", "美股范围与中文摘要初筛 10 篇", ("briefs", "--top", "10"), AbstractBrief),
-    ("FULLTEXT", "获取合法开放全文 3 篇", ("fetch", "--top", "3"), Paper),
-    ("RESEARCH_CARD", "生成研究卡 3 篇", ("analyze", "--top", "3"), ResearchCard),
-    ("CLAIM_EVIDENCE", "提取主张与原文证据", ("claims", "--top", "3"), Claim),
-    ("QUESTIONS", "生成并去重研究问题", ("questions",), ResearchQuestion),
+    ("DISCOVERY", "雷达采集并去重 300 项", ("daily", "--target", "300"), Paper),
+    ("RADAR", "元数据与摘要快速淘汰", ("radar", "--scout", "20"), RadarAssessment),
+    ("SCOUT", "侦察解读 Top 20", ("briefs", "--top", "20"), AbstractBrief),
+    ("DEEP_SELECTION", "增量判断并选出 Top 1–3", ("prioritize", "--deep", "3"), RadarAssessment),
+    ("FULLTEXT", "仅获取深研对象合法全文", ("fetch", "--top", "3"), Paper),
+    ("RESEARCH_CARD", "深度研究与证据卡", ("analyze", "--top", "3"), ResearchCard),
+    ("CLAIM_EVIDENCE", "提取 Claim 与 Evidence", ("claims", "--top", "3"), Claim),
+    ("QUESTIONS", "只生成高价值候选问题", ("questions",), ResearchQuestion),
+    (
+        "RESEARCH_BRIEF",
+        "自动完成 Research Brief",
+        ("validation-briefs", "--top", "3"),
+        ResearchValidationSpec,
+    ),
 )
 
 
@@ -42,7 +52,7 @@ def create_funnel_run(session_factory: Callable[[], Session]) -> tuple[PipelineR
         if running:
             return running, False
         run = PipelineRun(
-            query="[DAILY_FUNNEL] 100 → 10 → 3 → evidence → questions",
+            query="[THREE_SPEED] 300 → radar → 20 scout → 1-3 deep → brief",
             run_type="DAILY_FUNNEL",
             status="RUNNING",
             current_stage="PENDING",
@@ -121,9 +131,7 @@ def execute_funnel(
         run.question_count = created("QUESTIONS")
         run.ai_call_count = (
             session.scalar(
-                select(func.count())
-                .select_from(AICall)
-                .where(AICall.timestamp >= run.started_at)
+                select(func.count()).select_from(AICall).where(AICall.timestamp >= run.started_at)
             )
             or 0
         )
@@ -131,9 +139,7 @@ def execute_funnel(
         session.commit()
 
 
-def _stage_status(
-    session_factory: Callable[[], Session], run_id: str, code: str
-) -> str | None:
+def _stage_status(session_factory: Callable[[], Session], run_id: str, code: str) -> str | None:
     with session_factory() as session:
         return session.scalar(
             select(PipelineStageRun.status).where(

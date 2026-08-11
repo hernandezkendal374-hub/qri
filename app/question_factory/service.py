@@ -30,6 +30,8 @@ EXCLUDED_QUESTION_MARKERS = (
     "option-implied",
     "options data",
 )
+MIN_RESEARCH_PRIORITY = 0.72
+MIN_TESTABILITY = 0.65
 
 
 class CandidateQuestionService:
@@ -81,6 +83,11 @@ class CandidateQuestionService:
             ]
             for item in result.questions:
                 if not self._in_current_scope(item.academic_question):
+                    continue
+                if (
+                    item.research_priority_score < MIN_RESEARCH_PRIORITY
+                    or item.testability_score < MIN_TESTABILITY
+                ):
                     continue
                 normalized = self._normalize_question(item.academic_question)
                 if any(

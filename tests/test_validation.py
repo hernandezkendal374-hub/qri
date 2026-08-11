@@ -1,11 +1,14 @@
 import json
+from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
 from app.db.session import build_engine
+from app.main import create_app
 from app.models import AICall, ResearchQuestion, ResearchValidationSpec
 from app.providers.llm.fixture import FixtureLLMProvider
 from app.research_validation import ResearchValidationService
@@ -25,8 +28,7 @@ def validation_spec() -> dict:
     return {
         "plain_language_question": "机构资金紧张时，冷门股票是否更容易受到价格冲击？",
         "academic_question": (
-            "在美股横截面中，中介资本冲击与投资者知晓度的交互项"
-            "能否显著解释未来股票收益？"
+            "在美股横截面中，中介资本冲击与投资者知晓度的交互项能否显著解释未来股票收益？"
         ),
         "research_object": "美股横截面中的中介资本约束与投资者知晓度",
         "economic_mechanism": "资本受限的中介机构优先出售难以被其他投资者承接的股票。",
@@ -86,3 +88,53 @@ def test_validation_schema_contains_no_portfolio_or_backtest_fields() -> None:
     assert not keys.intersection(
         {"portfolio", "positions", "weights", "backtest", "sharpe", "max_drawdown"}
     )
+
+
+@pytest.mark.asyncio
+async def test_research_brief_has_one_exit_decision_gate(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'gate.db'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
+    with factory() as session:
+        question = ResearchQuestion(
+            question_uid="RQ-GATE-0001",
+            family="gate",
+            question="一个达到深研出口的问题",
+            plain_language_question="机构压力会放大冷门股票的价格冲击吗？",
+            academic_question="中介资本压力与知晓度交互项能否解释未来收益？",
+            economic_mechanism="机制",
+            counter_mechanism="反机制",
+            supporting_claims_json=[],
+            required_data_json=[],
+            known_risks_json=[],
+        )
+        session.add(question)
+        session.flush()
+        session.add(
+            ResearchValidationSpec(
+                question_id=question.id,
+                review_status="DRAFT",
+                specification_json=validation_spec(),
+                model="fixture",
+                prompt_version="fixture",
+            )
+        )
+        session.commit()
+        question_id = question.id
+
+    app = create_app(factory)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/questions/{question_id}/decision/defer", follow_redirects=False
+        )
+        assert response.status_code == 303
+
+    with factory() as session:
+        question = session.get(ResearchQuestion, question_id)
+        spec = session.scalar(
+            select(ResearchValidationSpec).where(ResearchValidationSpec.question_id == question_id)
+        )
+        assert question.status.value == "DEFERRED"
+        assert spec.review_status == "DEFERRED"

@@ -199,6 +199,26 @@ async def test_question_generation_repairs_shared_top_level_scores() -> None:
         session.close()
 
 
+@pytest.mark.asyncio
+async def test_low_value_candidates_are_not_forced_into_daily_questions() -> None:
+    session, papers, claims = setup_claims()
+    try:
+        comparison = await MultiPaperComparisonService(
+            session, FixtureLLMProvider([comparison_json(claims)]), "gpt-5.4"
+        ).compare(papers, claims)
+        payload = json.loads(questions_json(claims))
+        for question in payload["questions"]:
+            question["research_priority_score"] = 0.60
+            question["testability_score"] = 0.55
+        generated = await CandidateQuestionService(
+            session, FixtureLLMProvider([json.dumps(payload)]), "gpt-5.4"
+        ).generate(comparison, claims)
+        assert generated == []
+        assert session.scalar(select(func.count()).select_from(ResearchQuestion)) == 0
+    finally:
+        session.close()
+
+
 def test_question_scope_rejects_non_us_and_options_dependencies() -> None:
     assert CandidateQuestionService._in_current_scope(
         "美国小市值股票的收益预测能力是否稳定？"

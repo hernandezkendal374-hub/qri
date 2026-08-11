@@ -31,8 +31,10 @@ from app.models import (
     PipelineStageRun,
     QuestionStatus,
     QuestionTranslation,
+    RadarAssessment,
     ResearchCard,
     ResearchQuestion,
+    ResearchTheme,
     ResearchValidationSpec,
     StrategyIncubation,
 )
@@ -208,6 +210,7 @@ QUESTION_STATUS_LABELS = {
     "AI_REVIEWED": "AI 已审核",
     "HUMAN_REVIEW_REQUIRED": "等待人工审核",
     "HUMAN_APPROVED": "人工已通过",
+    "DEFERRED": "暂缓研究",
     "REJECTED": "已拒绝",
     "EXPORTED": "已导出",
 }
@@ -348,15 +351,16 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 )
                 or 0,
             }
-            target = 100
+            target = 300
             recent_runs = list(
                 session.scalars(select(PipelineRun).order_by(PipelineRun.id.desc()).limit(10))
             )
             daily_best_rows = list(
                 session.execute(
-                    select(
-                        ResearchQuestion,
-                        QuestionTranslation,
+                    select(ResearchQuestion, QuestionTranslation, ResearchValidationSpec)
+                    .join(
+                        ResearchValidationSpec,
+                        ResearchValidationSpec.question_id == ResearchQuestion.id,
                     )
                     .outerjoin(
                         QuestionTranslation,
@@ -368,12 +372,14 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 ).all()
             )
             best_by_day: dict[Any, dict[str, Any]] = {}
-            for question, translation in daily_best_rows:
+            today_research_briefs: list[dict[str, Any]] = []
+            for question, translation, validation in daily_best_rows:
                 local_date = question.created_at.replace(tzinfo=UTC).astimezone(LOCAL_ZONE).date()
                 merit = _research_merit(session, question)
                 candidate = {
                     "question": question,
                     "translation": translation,
+                    "validation": validation,
                     "merit": merit,
                     "score": merit["score"],
                     "date": local_date,
@@ -381,14 +387,63 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 existing = best_by_day.get(local_date)
                 if not existing or candidate["score"] > existing["score"]:
                     best_by_day[local_date] = candidate
+                if local_date == local_now.date():
+                    today_research_briefs.append(candidate)
+            today_research_briefs = sorted(
+                today_research_briefs,
+                key=lambda item: item["score"],
+                reverse=True,
+            )[:3]
             daily_best_history = [
-                best_by_day[group_date]
-                for group_date in sorted(best_by_day, reverse=True)[:7]
+                best_by_day[group_date] for group_date in sorted(best_by_day, reverse=True)[:7]
             ]
             daily_best = daily_best_history[0] if daily_best_history else None
-            daily_best_is_today = bool(
-                daily_best and daily_best["date"] == local_now.date()
-            )
+            daily_best_is_today = bool(daily_best and daily_best["date"] == local_now.date())
+            radar_stats = {
+                "scanned": session.scalar(
+                    select(func.count())
+                    .select_from(RadarAssessment)
+                    .where(RadarAssessment.assessed_at >= today_start)
+                )
+                or 0,
+                "evidence": session.scalar(
+                    select(func.count())
+                    .select_from(RadarAssessment)
+                    .where(
+                        RadarAssessment.assessed_at >= today_start,
+                        RadarAssessment.decision != "ARCHIVED",
+                    )
+                )
+                or 0,
+                "changed": session.scalar(
+                    select(func.count())
+                    .select_from(RadarAssessment)
+                    .where(
+                        RadarAssessment.assessed_at >= today_start,
+                        RadarAssessment.change_type.in_(("CONFLICT", "NEW_GAP")),
+                    )
+                )
+                or 0,
+                "conflicts": session.scalar(
+                    select(func.count())
+                    .select_from(RadarAssessment)
+                    .where(
+                        RadarAssessment.assessed_at >= today_start,
+                        RadarAssessment.change_type == "CONFLICT",
+                    )
+                )
+                or 0,
+                "deep": session.scalar(
+                    select(func.count())
+                    .select_from(RadarAssessment)
+                    .where(
+                        RadarAssessment.assessed_at >= today_start,
+                        RadarAssessment.decision == "DEEP",
+                    )
+                )
+                or 0,
+                "themes": session.scalar(select(func.count()).select_from(ResearchTheme)) or 0,
+            }
             funnel_run = session.scalar(
                 select(PipelineRun)
                 .where(PipelineRun.run_type == "DAILY_FUNNEL")
@@ -408,6 +463,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 {"code": code, "label": label, "row": stage_rows.get(code)}
                 for code, label, _, _ in FUNNEL_STAGES
             ]
+
             def stage_created(stage_code: str) -> int:
                 row = stage_rows.get(stage_code)
                 return int((row.metrics_json or {}).get("created", 0)) if row else 0
@@ -496,6 +552,8 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                     "daily_best": daily_best,
                     "daily_best_is_today": daily_best_is_today,
                     "daily_best_history": daily_best_history,
+                    "today_research_briefs": today_research_briefs,
+                    "radar_stats": radar_stats,
                     "funnel_run": funnel_run,
                     "funnel_stages": funnel_stages,
                     "funnel_live_counts": funnel_live_counts,
@@ -581,9 +639,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 .where(ResearchCard.paper_id == paper_id)
                 .order_by(ResearchCard.id.desc())
             )
-            brief = session.scalar(
-                select(AbstractBrief).where(AbstractBrief.paper_id == paper_id)
-            )
+            brief = session.scalar(select(AbstractBrief).where(AbstractBrief.paper_id == paper_id))
             card_fields = _card_fields(session, card) if card else []
             claims = list(
                 session.scalars(select(Claim).where(Claim.paper_id == paper_id).order_by(Claim.id))
@@ -719,9 +775,9 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                     timeout=max(settings.http_timeout_seconds, 60.0),
                 )
                 try:
-                    await AbstractBriefExtractor(
-                        session, provider, settings.primary_model
-                    ).extract(paper)
+                    await AbstractBriefExtractor(session, provider, settings.primary_model).extract(
+                        paper
+                    )
                 except Exception as exc:
                     raise HTTPException(status_code=502, detail="AI 摘要解读生成失败") from exc
         return RedirectResponse(f"/papers/{paper_id}#abstract-brief", status_code=303)
@@ -803,9 +859,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 if question_ids
                 else []
             )
-            validation_by_question = {
-                item.question_id: item for item in validation_specs
-            }
+            validation_by_question = {item.question_id: item for item in validation_specs}
             legacy_rows = (
                 list(
                     session.scalars(
@@ -890,7 +944,11 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         query_text = q.strip()
         with session_factory() as session:
             statement = (
-                select(ResearchQuestion, QuestionTranslation)
+                select(ResearchQuestion, QuestionTranslation, ResearchValidationSpec)
+                .join(
+                    ResearchValidationSpec,
+                    ResearchValidationSpec.question_id == ResearchQuestion.id,
+                )
                 .outerjoin(
                     QuestionTranslation,
                     QuestionTranslation.question_id == ResearchQuestion.id,
@@ -906,9 +964,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                     local_zone = ZoneInfo("Asia/Shanghai")
                     local_start = datetime.combine(search_date, datetime.min.time(), local_zone)
                     utc_start = local_start.astimezone(UTC).replace(tzinfo=None)
-                    utc_end = (local_start + timedelta(days=1)).astimezone(UTC).replace(
-                        tzinfo=None
-                    )
+                    utc_end = (local_start + timedelta(days=1)).astimezone(UTC).replace(tzinfo=None)
                     statement = statement.where(
                         ResearchQuestion.created_at >= utc_start,
                         ResearchQuestion.created_at < utc_end,
@@ -923,29 +979,16 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                         )
                     )
             rows = list(session.execute(statement).all())
-            question_ids = [question.id for question, _ in rows]
-            specs = (
-                list(
-                    session.scalars(
-                        select(ResearchValidationSpec).where(
-                            ResearchValidationSpec.question_id.in_(question_ids)
-                        )
-                    )
-                )
-                if question_ids
-                else []
-            )
-            spec_by_question = {row.question_id: row for row in specs}
             local_zone = ZoneInfo("Asia/Shanghai")
             grouped: dict[Any, list[dict[str, Any]]] = {}
-            for question, translation in rows:
+            for question, translation, validation in rows:
                 local_date = question.created_at.replace(tzinfo=UTC).astimezone(local_zone).date()
                 merit = _research_merit(session, question)
                 grouped.setdefault(local_date, []).append(
                     {
                         "question": question,
                         "translation": translation,
-                        "validation": spec_by_question.get(question.id),
+                        "validation": validation,
                         "merit": merit,
                         "score": merit["score"],
                     }
@@ -982,9 +1025,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         with session_factory() as session:
             question = session.get(ResearchQuestion, question_id)
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not question or not incubation:
                 raise HTTPException(status_code=404, detail="策略不存在")
@@ -1012,9 +1053,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         with session_factory() as session:
             question = session.get(ResearchQuestion, question_id)
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not question or not incubation:
                 raise HTTPException(status_code=404, detail="策略不存在")
@@ -1029,9 +1068,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             raise HTTPException(status_code=502, detail="公开行情暂时不可用，请稍后重试") from exc
         with session_factory() as session:
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not incubation:
                 raise HTTPException(status_code=404, detail="策略不存在")
@@ -1051,9 +1088,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             if not question:
                 raise HTTPException(status_code=404, detail="研究问题不存在")
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not incubation:
                 if not settings.llm_base_url or not settings.llm_api_key:
@@ -1086,9 +1121,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             raise HTTPException(status_code=502, detail="公开行情暂时不可用，请稍后重试") from exc
         with session_factory() as session:
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not incubation:
                 raise HTTPException(status_code=404, detail="策略不存在")
@@ -1105,9 +1138,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         with session_factory() as session:
             question = session.get(ResearchQuestion, question_id)
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not question or not incubation:
                 raise HTTPException(status_code=404, detail="策略不存在")
@@ -1137,9 +1168,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         }
         with session_factory() as session:
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not incubation:
                 raise HTTPException(status_code=404, detail="策略不存在")
@@ -1179,9 +1208,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             if not question:
                 raise HTTPException(status_code=404, detail="研究问题不存在")
             translation = session.scalar(
-                select(QuestionTranslation).where(
-                    QuestionTranslation.question_id == question_id
-                )
+                select(QuestionTranslation).where(QuestionTranslation.question_id == question_id)
             )
             package = _handoff_package(session, question, translation)
         return JSONResponse(
@@ -1203,9 +1230,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             if not question:
                 raise HTTPException(status_code=404, detail="研究问题不存在")
             translation = session.scalar(
-                select(QuestionTranslation).where(
-                    QuestionTranslation.question_id == question_id
-                )
+                select(QuestionTranslation).where(QuestionTranslation.question_id == question_id)
             )
             evidence_package = _handoff_package(session, question, translation)
             provider = OpenAICompatibleProvider(
@@ -1223,6 +1248,12 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
 
     @web.post("/questions/{question_id}/approve")
     def approve_validation_spec(question_id: int):
+        return decide_research_brief(question_id, "approve")
+
+    @web.post("/questions/{question_id}/decision/{decision}")
+    def decide_research_brief(question_id: int, decision: str):
+        if decision not in {"approve", "defer", "reject"}:
+            raise HTTPException(status_code=400, detail="未知人工决策")
         with session_factory() as session:
             question = session.get(ResearchQuestion, question_id)
             spec = session.scalar(
@@ -1232,9 +1263,18 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             )
             if not question or not spec:
                 raise HTTPException(status_code=404, detail="研究验证方案不存在")
-            question.status = QuestionStatus.HUMAN_APPROVED
-            spec.review_status = "APPROVED"
-            spec.approved_at = datetime.now(UTC).replace(tzinfo=None)
+            if decision == "approve":
+                question.status = QuestionStatus.HUMAN_APPROVED
+                spec.review_status = "APPROVED"
+                spec.approved_at = datetime.now(UTC).replace(tzinfo=None)
+            elif decision == "defer":
+                question.status = QuestionStatus.DEFERRED
+                spec.review_status = "DEFERRED"
+                spec.approved_at = None
+            else:
+                question.status = QuestionStatus.REJECTED
+                spec.review_status = "REJECTED"
+                spec.approved_at = None
             session.commit()
         return RedirectResponse(f"/questions#question-{question_id}", status_code=303)
 
@@ -1276,9 +1316,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             if not question:
                 raise HTTPException(status_code=404, detail="研究问题不存在")
             translation = session.scalar(
-                select(QuestionTranslation).where(
-                    QuestionTranslation.question_id == question_id
-                )
+                select(QuestionTranslation).where(QuestionTranslation.question_id == question_id)
             )
             handoff = _handoff_package(session, question, translation)
             provider = OpenAICompatibleProvider(
@@ -1292,18 +1330,14 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 ).generate(question, handoff)
             except Exception as exc:
                 raise HTTPException(status_code=502, detail="策略孵化方案生成失败") from exc
-        return RedirectResponse(
-            f"/questions#strategy-incubation-{question_id}", status_code=303
-        )
+        return RedirectResponse(f"/questions#strategy-incubation-{question_id}", status_code=303)
 
     @web.get("/questions/{question_id}/strategy-spec.json")
     def strategy_spec(question_id: int):
         with session_factory() as session:
             question = session.get(ResearchQuestion, question_id)
             incubation = session.scalar(
-                select(StrategyIncubation).where(
-                    StrategyIncubation.question_id == question_id
-                )
+                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
             )
             if not question or not incubation:
                 raise HTTPException(status_code=404, detail="策略孵化方案不存在")
@@ -1409,31 +1443,21 @@ def _handoff_package(
             "id": question.id,
             "uid": question.question_uid,
             "family": question.family,
-            "plain_language_question": (
-                question.plain_language_question or question.question
-            ),
+            "plain_language_question": (question.plain_language_question or question.question),
             "academic_question": question.academic_question or question.question,
             "question_zh": translation.question_zh if translation else question.question,
             "question_original": question.question,
             "economic_mechanism_zh": (
-                translation.economic_mechanism_zh
-                if translation
-                else question.economic_mechanism
+                translation.economic_mechanism_zh if translation else question.economic_mechanism
             ),
             "counter_mechanism_zh": (
-                translation.counter_mechanism_zh
-                if translation
-                else question.counter_mechanism
+                translation.counter_mechanism_zh if translation else question.counter_mechanism
             ),
             "required_data_zh": (
-                translation.required_data_zh_json
-                if translation
-                else question.required_data_json
+                translation.required_data_zh_json if translation else question.required_data_json
             ),
             "known_risks_zh": (
-                translation.known_risks_zh_json
-                if translation
-                else question.known_risks_json
+                translation.known_risks_zh_json if translation else question.known_risks_json
             ),
             "scores": {
                 "novelty": question.novelty_score,

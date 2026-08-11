@@ -20,7 +20,7 @@
   <details class="academic-question"><summary>查看学术定义</summary><p>{{ academic }}</p></details>
 
   {% if validation %}
-  <div class="validation-status-line"><span>Research Validation Spec</span><b class="review-{{ validation.review_status|lower }}">{{ '草稿待审核' if validation.review_status == 'DRAFT' else '人工已通过' if validation.review_status == 'APPROVED' else '已导出' }}</b></div>
+  <div class="validation-status-line"><span>完整 Research Brief</span><b class="review-{{ validation.review_status|lower }}">{{ '等待出口决策' if validation.review_status == 'DRAFT' else '批准进入 Quant System' if validation.review_status == 'APPROVED' else '暂缓研究' if validation.review_status == 'DEFERRED' else '已拒绝' if validation.review_status == 'REJECTED' else '已导出' }}</b></div>
 
   <section class="validation-module"><div class="module-number">1</div><div><small>这到底在研究什么？</small><h3>{{ spec.research_object }}</h3><p>{{ spec.academic_question }}</p></div></section>
 
@@ -54,8 +54,11 @@
   </div></div></section>
 
   {% if not archived %}<div class="validation-actions">
-    <form method="post" action="/questions/{{ question.id }}/validation-spec"><button class="secondary-button" type="submit">重新生成验证方案</button></form>
-    {% if validation.review_status == 'DRAFT' %}<form method="post" action="/questions/{{ question.id }}/approve"><button class="primary-button" type="submit">人工审核通过</button></form>{% endif %}
+    {% if validation.review_status == 'DRAFT' %}
+    <form method="post" action="/questions/{{ question.id }}/decision/approve"><button class="primary-button" type="submit">批准进入 Quant System</button></form>
+    <form method="post" action="/questions/{{ question.id }}/decision/defer"><button class="secondary-button" type="submit">暂缓</button></form>
+    <form method="post" action="/questions/{{ question.id }}/decision/reject"><button class="text-button danger" type="submit">拒绝</button></form>
+    {% endif %}
     {% if validation.review_status in ['APPROVED', 'EXPORTED'] %}<a class="primary-button" href="/questions/{{ question.id }}/validation-spec.json">导出 Candidate Question</a>{% endif %}
   </div>{% endif %}
   {% else %}
