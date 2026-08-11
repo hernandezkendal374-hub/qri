@@ -88,11 +88,22 @@ class ResearchTheme(Base):
     theme_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     name_zh: Mapped[str] = mapped_column(String(255))
     name_en: Mapped[str] = mapped_column(String(255))
+    family: Mapped[str | None] = mapped_column(String(128))
     summary: Mapped[str | None] = mapped_column(Text)
+    plain_language_summary: Mapped[str | None] = mapped_column(Text)
+    academic_summary: Mapped[str | None] = mapped_column(Text)
+    known_claims_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    known_conflicts_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    open_questions_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    active_research_questions_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
     paper_count: Mapped[int] = mapped_column(Integer, default=0)
     claim_count: Mapped[int] = mapped_column(Integer, default=0)
     conflict_count: Mapped[int] = mapped_column(Integer, default=0)
     last_changed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_material_change_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime)
+    research_maturity: Mapped[str | None] = mapped_column(String(32))
+    evidence_density: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -108,9 +119,123 @@ class RadarAssessment(Base):
     novelty_score: Mapped[float] = mapped_column(Float, default=0.0)
     conflict_score: Mapped[float] = mapped_column(Float, default=0.0)
     evidence_potential_score: Mapped[float] = mapped_column(Float, default=0.0)
+    incremental_value_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    claim_conflict_score: Mapped[float] = mapped_column(Float, default=0.0)
+    falsification_value_score: Mapped[float] = mapped_column(Float, default=0.0)
+    investment_relevance_hint: Mapped[float] = mapped_column(Float, default=0.0)
+    duplicate_knowledge_penalty: Mapped[float] = mapped_column(Float, default=0.0)
     radar_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
     reason: Mapped[str] = mapped_column(Text)
     assessed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class KnowledgeDelta(Base):
+    __tablename__ = "knowledge_deltas"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    delta_uid: Mapped[str] = mapped_column(
+        String(64), unique=True, default=lambda: f"KD-{uuid.uuid4().hex}"
+    )
+    theme_id: Mapped[int] = mapped_column(ForeignKey("research_themes.id"), index=True)
+    paper_id: Mapped[int | None] = mapped_column(ForeignKey("papers.id"), index=True)
+    source_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default="PAPER")
+    delta_type: Mapped[str] = mapped_column(String(48), index=True)
+    affected_claim_ids_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    summary: Mapped[str] = mapped_column(Text)
+    materiality_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ScoutAssessment(Base):
+    __tablename__ = "scout_assessments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id"), unique=True, index=True)
+    theme_id: Mapped[int] = mapped_column(ForeignKey("research_themes.id"), index=True)
+    research_value_score: Mapped[float] = mapped_column(Float, default=0.0)
+    investment_relevance_score: Mapped[float] = mapped_column(Float, default=0.0)
+    novelty: Mapped[float] = mapped_column(Float, default=0.0)
+    evidence_potential: Mapped[float] = mapped_column(Float, default=0.0)
+    conflict_potential: Mapped[float] = mapped_column(Float, default=0.0)
+    falsification_potential: Mapped[float] = mapped_column(Float, default=0.0)
+    data_availability_hint: Mapped[float] = mapped_column(Float, default=0.0)
+    implementation_feasibility_hint: Mapped[float] = mapped_column(Float, default=0.0)
+    recommend_deep_research: Mapped[bool] = mapped_column(Boolean, default=False)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class InvestmentRelevance(Base):
+    __tablename__ = "investment_relevance"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paper_id: Mapped[int | None] = mapped_column(ForeignKey("papers.id"), index=True)
+    theme_id: Mapped[int | None] = mapped_column(ForeignKey("research_themes.id"), index=True)
+    question_id: Mapped[int | None] = mapped_column(ForeignKey("research_questions.id"), index=True)
+    hypothesis_convertibility: Mapped[float] = mapped_column(Float, default=0.0)
+    data_availability: Mapped[float] = mapped_column(Float, default=0.0)
+    holding_period_fit: Mapped[float] = mapped_column(Float, default=0.0)
+    implementation_complexity: Mapped[float] = mapped_column(Float, default=0.0)
+    forward_validation_feasibility: Mapped[float] = mapped_column(Float, default=0.0)
+    capital_fit: Mapped[float] = mapped_column(Float, default=0.0)
+    summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class CommunityObservation(Base):
+    __tablename__ = "community_observations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    observation_uid: Mapped[str] = mapped_column(
+        String(64), unique=True, default=lambda: f"CO-{uuid.uuid4().hex}"
+    )
+    source_provider: Mapped[str] = mapped_column(String(64), default="quant_stackexchange")
+    source_tier: Mapped[str] = mapped_column(String(32), default="COMMUNITY")
+    target_theme_id: Mapped[int | None] = mapped_column(
+        ForeignKey("research_themes.id"), index=True
+    )
+    target_paper_id: Mapped[int | None] = mapped_column(ForeignKey("papers.id"), index=True)
+    target_claim_id: Mapped[int | None] = mapped_column(ForeignKey("claims.id"), index=True)
+    observation_type: Mapped[str] = mapped_column(String(48), default="RESEARCH_IDEA")
+    observation_text: Mapped[str] = mapped_column(Text)
+    implementation_conditions: Mapped[str | None] = mapped_column(Text)
+    author_name: Mapped[str | None] = mapped_column(String(255))
+    author_reputation: Mapped[int | None] = mapped_column(Integer)
+    votes: Mapped[int | None] = mapped_column(Integer)
+    accepted_answer: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_url: Mapped[str] = mapped_column(Text)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime)
+    content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    code_links_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    data_links_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    verification_status: Mapped[str] = mapped_column(String(32), default="UNVERIFIED", index=True)
+    independence_score: Mapped[float] = mapped_column(Float, default=0.0)
+    reproducibility_score: Mapped[float] = mapped_column(Float, default=0.0)
+    attack_dimension: Mapped[str] = mapped_column(String(32), default="OTHER")
+    # Kept as a plain id to avoid a circular DDL dependency with FalsificationTask.
+    generated_test_task_id: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class FalsificationTask(Base):
+    __tablename__ = "falsification_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_uid: Mapped[str] = mapped_column(
+        String(64), unique=True, default=lambda: f"FT-{uuid.uuid4().hex}"
+    )
+    theme_id: Mapped[int | None] = mapped_column(ForeignKey("research_themes.id"), index=True)
+    claim_id: Mapped[int | None] = mapped_column(ForeignKey("claims.id"), index=True)
+    observation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("community_observations.id"), index=True
+    )
+    question: Mapped[str] = mapped_column(Text)
+    attack_dimension: Mapped[str] = mapped_column(String(32), default="OTHER")
+    required_data_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    required_code_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    required_checks_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(32), default="PROPOSED", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class PaperVersion(Base):
@@ -269,6 +394,7 @@ class ResearchQuestion(Base):
     testability_score: Mapped[float | None] = mapped_column(Float)
     data_availability_score: Mapped[float | None] = mapped_column(Float)
     research_priority_score: Mapped[float | None] = mapped_column(Float)
+    priority_type: Mapped[str] = mapped_column(String(32), default="P3_EXPLORATORY", index=True)
     status: Mapped[QuestionStatus] = mapped_column(
         Enum(QuestionStatus), default=QuestionStatus.HUMAN_REVIEW_REQUIRED
     )

@@ -11,8 +11,8 @@ QRI 回答三个问题：什么值得研究、为什么值得研究、怎样证�
 ```text
 每天扫描约 300 项研究
   → 雷达模式：Title + Abstract + Metadata，无 AI 快筛
-  → 侦察模式：Top 20 增量判断与冲突检测
-  → 深度研究：Top 0–3 全文、Claim 与 Evidence
+  → 侦察模式：增量研究价值阈值 + 上限（不填满配额）
+  → 深度研究：深研阈值 + 上限，允许为 0
   → Research Brief：问题、反证与 Validation Spec
   → 一次人工 Gate：批准 / 暂缓 / 拒绝
 ```
@@ -21,11 +21,11 @@ QRI 回答三个问题：什么值得研究、为什么值得研究、怎样证�
 
 ### 雷达模式
 
-低成本检查相关性、新颖度、与既有观点的冲突和证据潜力。未改变已有知识的论文直接归档，不获取全文、不调用高阶模型。
+低成本检查相关性、增量价值、Claim 冲突、证伪价值、投资相关性提示和重复知识惩罚。`LOW_INCREMENTAL_VALUE`、`NO_MATERIAL_CHANGE` 直接归档，不获取全文、不调用高阶模型。
 
 ### 侦察模式
 
-最多保留 20 项，生成摘要级中文解读，回答“它改变了我们已经知道的什么”。之后再次排序，只有达到阈值的 0–3 项进入深研。
+只处理达到 Scout 阈值的项目，最多不超过上限，生成摘要级中文解读，回答“它改变了我们已经知道的什么”。之后再次按 Research Value + Investment Relevance 选择深研，达到阈值的项目才进入，数量可以为 0。
 
 ### 深度研究模式
 
@@ -37,10 +37,12 @@ QRI 回答三个问题：什么值得研究、为什么值得研究、怎样证�
 
 每篇新论文都会被归入主题，并标记为：
 
-- `NO_CHANGE`：未改变现有知识，自动归档
-- `EXTENSION`：已有主题的补充
-- `NEW_GAP`：暴露新的研究缺口
-- `CONFLICT`：可能改变已有观点的重要冲突
+- `NO_MATERIAL_CHANGE` / `LOW_INCREMENTAL_VALUE`：未改变现有知识，自动归档
+- `NEW_CONDITION`：已有主题的新样本、时期或实现约束
+- `NEW_EVIDENCE`：为主题补充有用证据
+- `NEW_CONFLICT`：可能改变已有观点的重要冲突
+
+每次运行都会留下 `KnowledgeDelta`，因此主题只处理“认知发生了什么变化”，不会每天重复研究整个 Momentum 或 Value 主题。
 
 ## Research Brief
 
@@ -74,6 +76,10 @@ QRI 回答三个问题：什么值得研究、为什么值得研究、怎样证�
 
 发现层聚合 arXiv、OpenAlex、Crossref 和 Semantic Scholar，并使用 Unpaywall 补充合法开放全文。单一来源失败不会阻断其他来源。仅有摘要时明确标记为 `ABSTRACT_ONLY`，不会声称已经读取全文。
 
+## 社区攻击雷达（Shadow Mode）
+
+当前只接 Quantitative Finance StackExchange 官方 API，作为独立 `ResearchSourceProvider`。论坛正文始终是 `UNTRUSTED_EXTERNAL_CONTENT`：不执行其中代码、不自动访问外链、不进入 Claim / Evidence、不改变正式每日排名。它只生成默认 `UNVERIFIED` 的 `CommunityObservation`，并可提出待人工审核的 `FalsificationTask`。页面：`/community-attack-radar`。
+
 ## 本地运行
 
 需要 Python 3.12+。复制 `.env.example` 为 `.env`，配置数据库和 OpenAI-compatible 模型接口。
@@ -93,19 +99,22 @@ uvicorn app.main:app --reload
 - `/claims`：作者主张与原文证据
 - `/questions`：完整 Research Brief
 - `/daily-best`：Research Brief 历史归档
+- `/themes`：长期维护的 Research Theme 与 Knowledge Delta
+- `/community-attack-radar`：社区弱信号和证伪任务（Shadow Mode）
 
 ## 命令行
 
 ```powershell
 qri daily --target 300
-qri radar --scout 20
-qri briefs --top 20
-qri prioritize --deep 3
+qri radar --scout-max 30 --threshold 0.48
+qri briefs --top 30
+qri prioritize --deep 5 --threshold 0.62
 qri fetch --top 3
 qri analyze --top 3
 qri claims --top 3
 qri questions
 qri validation-briefs --top 3
+qri community-shadow --query "momentum transaction cost replication"
 ```
 
 `qri daily-funnel` 会按上述顺序自动运行，并支持从失败阶段恢复。
@@ -120,6 +129,17 @@ VALIDATION_MODEL=claude-sonnet-4-6
 
 雷达快筛不调用 AI；`PRIMARY_MODEL` 用于侦察与论文分析，`REASONING_MODEL` 用于问题生成，`VALIDATION_MODEL` 用于 Research Validation Spec。`STRATEGY_MODEL` 仅为旧数据兼容保留。
 
+增量漏斗可以通过以下环境变量调整。它们都是阈值和安全上限，不是必须填满的数量：
+
+```env
+SCOUT_SCORE_THRESHOLD=0.48
+SCOUT_MAX_ITEMS=30
+DEEP_RESEARCH_THRESHOLD=0.62
+DEEP_RESEARCH_MAX_ITEMS=5
+DAILY_SCAN_TARGET=300
+COMMUNITY_SHADOW_ENABLED=true
+```
+
 ## 数据库升级
 
 ```powershell
@@ -128,6 +148,8 @@ alembic upgrade head
 
 - `0010`：双版本问题与 `research_validation_specs`
 - `0011`：`research_themes` 与 `radar_assessments`
+- `0012`：增量知识 `knowledge_deltas`、`scout_assessments`、`investment_relevance`、社区 Shadow Mode 表
+- `0013`：Research Question 优先级分层 `P0`–`P3`
 
 旧论文、问题、策略与回测数据均保留。
 

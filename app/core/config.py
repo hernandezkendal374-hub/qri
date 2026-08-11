@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     primary_model: str = "claude-sonnet-4-6"
     reasoning_model: str = "claude-sonnet-4-6"
     validation_model: str = "claude-sonnet-4-6"
+    # Incremental-value funnel controls.  They are thresholds with safety caps,
+    # never promises to fill a quota.
+    scout_score_threshold: float = 0.48
+    scout_max_items: int = 30
+    deep_research_threshold: float = 0.62
+    deep_research_max_items: int = 5
+    daily_scan_target: int = 300
+    community_shadow_enabled: bool = True
+    stackexchange_api_key: SecretStr | None = None
     # Legacy only: retained so archived strategy records remain readable.
     strategy_model: str = "gpt-5.6-sol"
     semantic_scholar_api_key: SecretStr | None = None

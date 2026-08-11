@@ -145,7 +145,7 @@ async def run_quick_backtest(profile: str = "momentum") -> dict[str, Any]:
 
         if date in month_end_set and index >= 252:
             signal = _signal_values(profile, close, index)
-            ranked = sorted(signal, key=signal.get)
+            ranked = sorted(signal, key=lambda symbol: signal[symbol])
             leg_size = 3 if profile.endswith("_v2") else 2
             if profile.startswith("low_volatility"):
                 longs, shorts = ranked[:leg_size], ranked[-leg_size:]
@@ -272,7 +272,7 @@ async def _run_cross_asset_etf_backtest() -> dict[str, Any]:
             residuals = {
                 symbol: value - cross_mean for symbol, value in recent_returns.items()
             }
-            ranked = sorted(residuals, key=residuals.get)
+            ranked = sorted(residuals, key=lambda symbol: residuals[symbol])
             longs, shorts = ranked[:2], ranked[-2:]
             target = {symbol: 0.0 for symbol in symbols}
             for symbol in longs:

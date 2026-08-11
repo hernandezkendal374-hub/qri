@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.extraction.json_parser import parse_json_model, parse_json_object
-from app.models import Claim, PaperComparison, QuestionStatus, ResearchQuestion
+from app.models import Claim, InvestmentRelevance, PaperComparison, QuestionStatus, ResearchQuestion
 from app.providers.llm.audit import record_ai_call
 from app.providers.llm.base import LLMProvider, LLMResponse
 from app.schemas.comparison import CandidateQuestionSet
@@ -106,6 +106,28 @@ class CandidateQuestionService:
                 for index, item in enumerate(accepted_items, 1)
             ]
             self.session.add_all(questions)
+            self.session.flush()
+            for question in questions:
+                self.session.add(
+                    InvestmentRelevance(
+                        question_id=question.id,
+                        hypothesis_convertibility=(
+                            0.85
+                            if question.priority_type == "P0_ALPHA_CANDIDATE"
+                            else 0.65
+                            if question.priority_type == "P1_POTENTIAL_ALPHA"
+                            else 0.40
+                        ),
+                        data_availability=question.data_availability_score or 0.0,
+                        holding_period_fit=0.5,
+                        implementation_complexity=0.5,
+                        forward_validation_feasibility=question.testability_score or 0.0,
+                        capital_fit=0.5,
+                        summary=(
+                            "这是研究转化性分层，不预测收益、风险调整收益或利润。"
+                        ),
+                    )
+                )
             record_ai_call(
                 self.session,
                 run_id=run_id,
@@ -153,8 +175,19 @@ class CandidateQuestionService:
             testability_score=item.testability_score,
             data_availability_score=item.data_availability_score,
             research_priority_score=item.research_priority_score,
+            priority_type=self._priority_type(item.research_priority_score),
             status=QuestionStatus.HUMAN_REVIEW_REQUIRED,
         )
+
+    @staticmethod
+    def _priority_type(score: float) -> str:
+        if score >= 0.85:
+            return "P0_ALPHA_CANDIDATE"
+        if score >= 0.75:
+            return "P1_POTENTIAL_ALPHA"
+        if score >= 0.60:
+            return "P2_RESEARCH_INFRASTRUCTURE"
+        return "P3_EXPLORATORY"
 
     @staticmethod
     def _parse_result(content: str) -> CandidateQuestionSet:

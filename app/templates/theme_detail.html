@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ theme.name_zh }}{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">Research Theme · {{ theme.theme_key }}</p><h1>{{ theme.name_zh }}</h1><p class="lede">{{ theme.plain_language_summary or theme.summary or '主题摘要尚未生成。' }}</p></div><a class="secondary-button" href="/themes">返回主题</a></section>
+<section class="theme-detail-grid">
+  <article class="panel"><h2>主题状态</h2><div class="metric-grid compact"><div><strong>{{ theme.paper_count }}</strong><span>论文</span></div><div><strong>{{ theme.claim_count }}</strong><span>Claim</span></div><div><strong>{{ theme.conflict_count }}</strong><span>冲突</span></div><div><strong>{{ theme.evidence_density or 0 }}</strong><span>证据密度</span></div></div><p>{{ theme.academic_summary or 'Evidence stream is being accumulated.' }}</p></article>
+  <article class="panel"><h2>Claim Graph 摘要</h2><div class="metric-grid compact"><div><strong>{{ theme.known_claims_json|length }}</strong><span>Known Claims</span></div><div><strong>{{ theme.known_conflicts_json|length }}</strong><span>Open Conflicts</span></div><div><strong>{{ theme.active_research_questions_json|length }}</strong><span>Candidate Questions</span></div><div><strong>{{ theme.open_questions_json|length }}</strong><span>Open Questions</span></div></div><p>Supporting / Contradicting Evidence 保留在 Claim / Evidence 证据链中；本页只展示主题级索引。</p></article>
+  <article class="panel"><h2>最近 Knowledge Delta</h2>{% for delta, paper in deltas %}<div class="delta-row"><span class="delta-type">{{ delta.delta_type }}</span><p>{{ delta.summary }}</p><small>{{ paper.title if paper else '外部来源' }}</small></div>{% else %}<div class="empty-state">尚无变化记录。</div>{% endfor %}</article>
+  <article class="panel"><h2>社区观察（Shadow Mode）</h2>{% for observation in observations %}<div class="observation-row"><span>{{ observation.observation_type }} · {{ observation.attack_dimension }}</span><p>{{ observation.observation_text|truncate(300) }}</p><small>{{ observation.verification_status }} · <a href="{{ observation.source_url }}" rel="noreferrer">查看来源</a></small></div>{% else %}<div class="empty-state">尚无社区观察。</div>{% endfor %}</article>
+</section>
+{% endblock %}

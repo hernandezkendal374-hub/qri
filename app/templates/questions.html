@@ -9,7 +9,7 @@
 {% set academic = spec.academic_question if spec else question.academic_question or (translation.question_zh if translation else question.question) %}
 <article id="question-{{ question.id }}" class="question-card validation-card {% if rank == 1 %}priority-question{% endif %} {% if archived %}archived-question{% endif %}">
   <div class="question-top">
-    <span class="question-id">{% if rank %}排名 #{{ rank }} · {% endif %}{{ question.question_uid }}</span>
+    <span class="question-id">{% if rank %}排名 #{{ rank }} · {% endif %}{{ question.question_uid }} · {{ question.priority_type or 'P3_EXPLORATORY' }}</span>
     <div class="question-actions">
       <span class="status {{ question.status.value|lower }}">{{ question.status|question_status_zh }}</span>
       <form method="post" action="/questions/{{ question.id }}/{{ 'restore' if archived else 'archive' }}"><button class="text-button" type="submit">{{ '恢复' if archived else '归档' }}</button></form>

@@ -24,8 +24,11 @@ from app.models import (
     AbstractBrief,
     AICall,
     Claim,
+    CommunityObservation,
     Document,
     Evidence,
+    FalsificationTask,
+    KnowledgeDelta,
     Paper,
     PipelineRun,
     PipelineStageRun,
@@ -138,7 +141,12 @@ def _research_merit(session: Session, question: ResearchQuestion) -> dict[str, f
         if claim_ids
         else []
     )
-    evidence_quality = sum(confidences) / len(confidences) if confidences else 0.35
+    numeric_confidences = [value for value in confidences if value is not None]
+    evidence_quality = (
+        sum(numeric_confidences) / len(numeric_confidences)
+        if numeric_confidences
+        else 0.35
+    )
     conflict = min(1.0, len(contradicting) / max(1, len(supporting)))
     falsifiability = min(
         1.0,
@@ -351,7 +359,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 )
                 or 0,
             }
-            target = 300
+            target = settings.daily_scan_target
             recent_runs = list(
                 session.scalars(select(PipelineRun).order_by(PipelineRun.id.desc()).limit(10))
             )
@@ -415,6 +423,16 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                     )
                 )
                 or 0,
+                "new_unique_papers": stats["papers_today"],
+                "scout": session.scalar(
+                    select(func.count())
+                    .select_from(RadarAssessment)
+                    .where(
+                        RadarAssessment.assessed_at >= today_start,
+                        RadarAssessment.decision == "SCOUT",
+                    )
+                )
+                or 0,
                 "changed": session.scalar(
                     select(func.count())
                     .select_from(RadarAssessment)
@@ -443,7 +461,33 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 )
                 or 0,
                 "themes": session.scalar(select(func.count()).select_from(ResearchTheme)) or 0,
+                "knowledge_deltas": session.scalar(
+                    select(func.count())
+                    .select_from(KnowledgeDelta)
+                    .where(
+                        KnowledgeDelta.created_at >= today_start,
+                        KnowledgeDelta.delta_type != "NO_MATERIAL_CHANGE",
+                    )
+                )
+                or 0,
+                "community_observations": session.scalar(
+                    select(func.count()).select_from(CommunityObservation)
+                )
+                or 0,
             }
+            knowledge_deltas = list(
+                session.execute(
+                    select(KnowledgeDelta, ResearchTheme, Paper)
+                    .join(ResearchTheme, ResearchTheme.id == KnowledgeDelta.theme_id)
+                    .outerjoin(Paper, Paper.id == KnowledgeDelta.paper_id)
+                    .where(KnowledgeDelta.delta_type != "NO_MATERIAL_CHANGE")
+                    .order_by(KnowledgeDelta.created_at.desc())
+                    .limit(12)
+                ).all()
+            )
+            community_attack_count = session.scalar(
+                select(func.count()).select_from(CommunityObservation)
+            ) or 0
             funnel_run = session.scalar(
                 select(PipelineRun)
                 .where(PipelineRun.run_type == "DAILY_FUNNEL")
@@ -492,7 +536,9 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 )
                 or 0,
             }
-            active_stage = stage_rows.get(funnel_run.current_stage) if funnel_run else None
+            active_stage = (
+                stage_rows.get(funnel_run.current_stage or "") if funnel_run else None
+            )
             stale_before = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=30)
             funnel_is_stale = bool(
                 funnel_run
@@ -554,6 +600,8 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                     "daily_best_history": daily_best_history,
                     "today_research_briefs": today_research_briefs,
                     "radar_stats": radar_stats,
+                    "knowledge_deltas": knowledge_deltas,
+                    "community_attack_count": community_attack_count,
                     "funnel_run": funnel_run,
                     "funnel_stages": funnel_stages,
                     "funnel_live_counts": funnel_live_counts,
@@ -596,6 +644,85 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         _launch_funnel_process(run_id)
         return RedirectResponse("/dashboard?funnel=resumed#task-center", status_code=303)
 
+    @web.get("/themes")
+    def research_themes(request: Request):
+        with session_factory() as session:
+            themes = list(
+                session.scalars(
+                    select(ResearchTheme).order_by(
+                        ResearchTheme.last_material_change_at.desc().nullslast(),
+                        ResearchTheme.paper_count.desc(),
+                    )
+                )
+            )
+            return templates.TemplateResponse(
+                request=request,
+                name="themes.html",
+                context={"themes": themes, "active": "themes"},
+            )
+
+    @web.get("/themes/{theme_id}")
+    def research_theme_detail(request: Request, theme_id: int):
+        with session_factory() as session:
+            theme = session.get(ResearchTheme, theme_id)
+            if not theme:
+                raise HTTPException(status_code=404, detail="研究主题不存在")
+            deltas = list(
+                session.execute(
+                    select(KnowledgeDelta, Paper)
+                    .outerjoin(Paper, Paper.id == KnowledgeDelta.paper_id)
+                    .where(KnowledgeDelta.theme_id == theme_id)
+                    .order_by(KnowledgeDelta.created_at.desc())
+                    .limit(100)
+                ).all()
+            )
+            observations = list(
+                session.scalars(
+                    select(CommunityObservation)
+                    .where(CommunityObservation.target_theme_id == theme_id)
+                    .order_by(CommunityObservation.created_at.desc())
+                    .limit(50)
+                )
+            )
+            return templates.TemplateResponse(
+                request=request,
+                name="theme_detail.html",
+                context={
+                    "theme": theme,
+                    "deltas": deltas,
+                    "observations": observations,
+                    "active": "themes",
+                },
+            )
+
+    @web.get("/community-attack-radar")
+    def community_attack_radar(request: Request):
+        with session_factory() as session:
+            observations = list(
+                session.scalars(
+                    select(CommunityObservation)
+                    .order_by(CommunityObservation.created_at.desc())
+                    .limit(200)
+                )
+            )
+            tasks = list(
+                session.scalars(
+                    select(FalsificationTask)
+                    .order_by(FalsificationTask.created_at.desc())
+                    .limit(200)
+                )
+            )
+            return templates.TemplateResponse(
+                request=request,
+                name="community_attack_radar.html",
+                context={
+                    "observations": observations,
+                    "tasks": tasks,
+                    "active": "community",
+                    "shadow_mode": True,
+                },
+            )
+
     @web.get("/papers")
     def papers(request: Request, scope: str = ""):
         with session_factory() as session:
@@ -603,11 +730,12 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
             if scope in RESEARCH_SCOPE_LABELS:
                 statement = statement.where(Paper.research_scope == scope)
             rows = list(session.scalars(statement))
-            scope_counts = dict(
-                session.execute(
+            scope_counts: dict[str, int] = {
+                scope_name: int(count)
+                for scope_name, count in session.execute(
                     select(Paper.research_scope, func.count()).group_by(Paper.research_scope)
                 ).all()
-            )
+            }
             return templates.TemplateResponse(
                 request=request,
                 name="papers.html",

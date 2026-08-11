@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}研究主题{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><p class="eyebrow">长期维护的证据流</p><h1>研究主题</h1><p class="lede">论文只是输入；主题记录我们对一类问题的已知主张、冲突和最近变化。</p></div>
+</section>
+<section class="theme-grid">
+  {% for theme in themes %}
+  <a class="theme-card" href="/themes/{{ theme.id }}">
+    <div><span class="eyebrow">{{ theme.family or theme.theme_key }}</span><h2>{{ theme.name_zh }}</h2><p>{{ theme.plain_language_summary or theme.summary or '尚未生成主题摘要。' }}</p></div>
+    <div class="theme-card-stats"><span>{{ theme.paper_count }} 篇论文</span><span>{{ theme.claim_count }} 条 Claim</span><span>{{ theme.conflict_count }} 个冲突</span><strong>{{ theme.research_maturity or 'SEED' }}</strong></div>
+  </a>
+  {% else %}<div class="empty-state">还没有建立研究主题。下一次雷达运行会自动从论文流建立。</div>{% endfor %}
+</section>
+{% endblock %}

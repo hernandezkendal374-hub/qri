@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models import (
     AbstractBrief,
     AICall,
@@ -24,19 +25,55 @@ from app.models import (
 from app.models.entities import FullTextStatus
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_SETTINGS = get_settings()
 FUNNEL_STAGES = (
-    ("DISCOVERY", "雷达采集并去重 300 项", ("daily", "--target", "300"), Paper),
-    ("RADAR", "元数据与摘要快速淘汰", ("radar", "--scout", "20"), RadarAssessment),
-    ("SCOUT", "侦察解读 Top 20", ("briefs", "--top", "20"), AbstractBrief),
-    ("DEEP_SELECTION", "增量判断并选出 Top 1–3", ("prioritize", "--deep", "3"), RadarAssessment),
-    ("FULLTEXT", "仅获取深研对象合法全文", ("fetch", "--top", "3"), Paper),
-    ("RESEARCH_CARD", "深度研究与证据卡", ("analyze", "--top", "3"), ResearchCard),
-    ("CLAIM_EVIDENCE", "提取 Claim 与 Evidence", ("claims", "--top", "3"), Claim),
+    (
+        "DISCOVERY",
+        f"雷达采集并去重 {_SETTINGS.daily_scan_target} 项",
+        ("daily", "--target", str(_SETTINGS.daily_scan_target)),
+        Paper,
+    ),
+    (
+        "RADAR",
+        "增量价值筛选（阈值 + 上限）",
+        ("radar", "--scout-max", str(_SETTINGS.scout_max_items)),
+        RadarAssessment,
+    ),
+    (
+        "SCOUT",
+        "侦察研究价值与投资相关性",
+        ("briefs", "--top", str(_SETTINGS.scout_max_items)),
+        AbstractBrief,
+    ),
+    (
+        "DEEP_SELECTION",
+        "按深研阈值与上限选择",
+        ("prioritize", "--deep", str(_SETTINGS.deep_research_max_items)),
+        RadarAssessment,
+    ),
+    (
+        "FULLTEXT",
+        "仅获取深研对象合法全文",
+        ("fetch", "--top", str(_SETTINGS.deep_research_max_items)),
+        Paper,
+    ),
+    (
+        "RESEARCH_CARD",
+        "深度研究与证据卡",
+        ("analyze", "--top", str(_SETTINGS.deep_research_max_items)),
+        ResearchCard,
+    ),
+    (
+        "CLAIM_EVIDENCE",
+        "提取 Claim 与 Evidence",
+        ("claims", "--top", str(_SETTINGS.deep_research_max_items)),
+        Claim,
+    ),
     ("QUESTIONS", "只生成高价值候选问题", ("questions",), ResearchQuestion),
     (
         "RESEARCH_BRIEF",
         "自动完成 Research Brief",
-        ("validation-briefs", "--top", "3"),
+        ("validation-briefs", "--top", str(_SETTINGS.deep_research_max_items)),
         ResearchValidationSpec,
     ),
 )
@@ -52,7 +89,11 @@ def create_funnel_run(session_factory: Callable[[], Session]) -> tuple[PipelineR
         if running:
             return running, False
         run = PipelineRun(
-            query="[THREE_SPEED] 300 → radar → 20 scout → 1-3 deep → brief",
+            query=(
+                f"[INCREMENTAL_VALUE] {_SETTINGS.daily_scan_target} → threshold scout "
+                f"(max {_SETTINGS.scout_max_items}) → deep "
+                f"(max {_SETTINGS.deep_research_max_items})"
+            ),
             run_type="DAILY_FUNNEL",
             status="RUNNING",
             current_stage="PENDING",
@@ -119,16 +160,16 @@ def execute_funnel(
             )
         }
 
-        def created(stage: str) -> int:
+        def stage_created(stage: str) -> int:
             row = stage_rows.get(stage)
             return int((row.metrics_json or {}).get("created", 0)) if row else 0
 
-        run.discovered_count = created("DISCOVERY")
-        run.deduplicated_count = created("DISCOVERY")
-        run.fulltext_success_count = created("FULLTEXT")
-        run.research_card_count = created("RESEARCH_CARD")
-        run.claim_count = created("CLAIM_EVIDENCE")
-        run.question_count = created("QUESTIONS")
+        run.discovered_count = stage_created("DISCOVERY")
+        run.deduplicated_count = stage_created("DISCOVERY")
+        run.fulltext_success_count = stage_created("FULLTEXT")
+        run.research_card_count = stage_created("RESEARCH_CARD")
+        run.claim_count = stage_created("CLAIM_EVIDENCE")
+        run.question_count = stage_created("QUESTIONS")
         run.ai_call_count = (
             session.scalar(
                 select(func.count()).select_from(AICall).where(AICall.timestamp >= run.started_at)

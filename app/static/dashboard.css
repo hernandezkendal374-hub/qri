@@ -270,7 +270,7 @@
 .evidence-chain p { margin: 5px 0; }
 .legacy-archive { padding: 13px; color: var(--muted); background: #f1f1ef; border-radius: 10px; }
 @media (max-width: 760px) { .validation-two-column, .variable-grid, .validation-detail-grid { grid-template-columns: 1fr; } .validation-empty { align-items: flex-start; flex-direction: column; } .boundary-banner { align-items: flex-start; flex-direction: column; } }
-.radar-overview { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; margin: 24px 0 34px; }
+.radar-overview { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin: 24px 0 34px; }
 .radar-overview > div { display: grid; gap: 4px; padding: 18px; background: #fff; border: 1px solid var(--line); border-radius: 16px; }
 .radar-overview > div.highlight { color: #fff; background: var(--green); border-color: var(--green); }
 .radar-overview small, .radar-overview span { opacity: .75; }

@@ -6,6 +6,7 @@ import typer
 from sqlalchemy import exists, func, or_, select
 
 from app.claims.service import ClaimEvidenceExtractor
+from app.community import ShadowCommunityService, claim_driven_queries
 from app.comparison.service import MultiPaperComparisonService
 from app.core.config import get_settings
 from app.db.base import Base
@@ -20,8 +21,11 @@ from app.funnel.runner import create_funnel_run, execute_funnel
 from app.models import (
     AbstractBrief,
     Claim,
+    CommunityObservation,
     Document,
     Evidence,
+    FalsificationTask,
+    KnowledgeDelta,
     Paper,
     PaperComparison,
     PipelineRun,
@@ -29,11 +33,13 @@ from app.models import (
     RadarAssessment,
     ResearchCard,
     ResearchQuestion,
+    ResearchTheme,
     ResearchValidationSpec,
 )
 from app.models.entities import FullTextStatus
 from app.parsing.pymupdf_parser import PyMuPDFParser
 from app.pipeline.orchestrator import PipelineOrchestrator
+from app.providers.community import QuantStackExchangeProvider
 from app.providers.llm.openai_compatible import OpenAICompatibleProvider
 from app.providers.papers.arxiv import ArxivProvider
 from app.providers.papers.crossref import CrossrefProvider
@@ -78,9 +84,11 @@ def _uncompared_claimed_paper_ids(session, limit: int = 3) -> list[int]:
         select(Paper.id)
         .join(Claim, Claim.paper_id == Paper.id)
         .join(RadarAssessment, RadarAssessment.paper_id == Paper.id)
+        .join(KnowledgeDelta, KnowledgeDelta.paper_id == Paper.id)
         .where(
             Paper.research_scope == US_EQUITY_CORE,
             RadarAssessment.decision == "DEEP",
+            KnowledgeDelta.delta_type != "NO_MATERIAL_CHANGE",
         )
         .group_by(Paper.id)
         .order_by(Paper.citation_count.desc().nullslast(), Paper.id.desc())
@@ -223,25 +231,37 @@ def daily(target: int = typer.Option(300, min=1, max=500)) -> None:
 
 
 @app.command("radar")
-def radar(scout: int = typer.Option(20, min=1, max=100)) -> None:
-    """Cheap metadata-and-abstract triage; archive most papers without deep analysis."""
+def radar(
+    scout: int | None = typer.Option(None, min=0, max=200, help="兼容旧参数：Scout 最大数量"),
+    scout_max: int | None = typer.Option(None, min=0, max=200),
+    threshold: float | None = typer.Option(None, min=0.0, max=1.0),
+) -> None:
+    """Incremental-value radar; threshold and cap, never a quota."""
     Base.metadata.create_all(engine)
     with SessionLocal() as session:
-        rows = RadarService(session).assess(scout_limit=scout)
+        service = RadarService(session)
+        backfilled = service.backfill_existing()
+        max_items = scout_max if scout_max is not None else scout
+        rows = service.assess(scout_limit=max_items, threshold=threshold)
         selected = sum(row.decision == "SCOUT" for row in rows)
         conflicts = sum(row.change_type == "CONFLICT" for row in rows)
+        low_value = sum(row.change_type == "LOW_INCREMENTAL_VALUE" for row in rows)
         typer.echo(
             f"Radar assessed: {len(rows)}; scout: {selected}; "
-            f"archived: {len(rows) - selected}; conflicts: {conflicts}"
+            f"archived: {len(rows) - selected}; conflicts: {conflicts}; "
+            f"low incremental: {low_value}; legacy deltas added: {backfilled}"
         )
 
 
 @app.command("prioritize")
-def prioritize(deep: int = typer.Option(3, min=1, max=3)) -> None:
-    """Promote at most three scouted papers to evidence-grade deep research."""
+def prioritize(
+    deep: int | None = typer.Option(None, min=0, max=100),
+    threshold: float | None = typer.Option(None, min=0.0, max=1.0),
+) -> None:
+    """Promote threshold-passing Scout items to Deep Research."""
     Base.metadata.create_all(engine)
     with SessionLocal() as session:
-        selected = RadarService(session).prioritize(deep_limit=deep)
+        selected = RadarService(session).prioritize(deep_limit=deep, threshold=threshold)
         typer.echo(f"Deep research selected: {len(selected)}")
 
 
@@ -257,6 +277,9 @@ def daily_funnel() -> None:
     execute_funnel(run.run_id, SessionLocal)
     with SessionLocal() as session:
         completed = session.scalar(select(PipelineRun).where(PipelineRun.run_id == run.run_id))
+        if not completed:
+            typer.echo("Daily funnel finished but its run record could not be read.", err=True)
+            raise typer.Exit(code=1)
         typer.echo(
             f"Daily funnel {completed.status}: {completed.deduplicated_count} new papers, "
             f"{completed.research_card_count} cards, {completed.claim_count} claims, "
@@ -421,6 +444,8 @@ def briefs(top: int = typer.Option(10, min=1, max=100)) -> None:
                     typer.echo(f"OK {paper.id}: Abstract Brief — {paper.title}")
                 except Exception as exc:
                     typer.echo(f"ERROR {paper.id}: {type(exc).__name__}: {exc}", err=True)
+            scout_rows = RadarService(session).build_scout_assessments()
+            typer.echo(f"Scout assessments: {len(scout_rows)}")
             typer.echo(f"Abstract Briefs: {success}/{len(papers)}")
 
     asyncio.run(run())
@@ -559,6 +584,48 @@ def claims(top: int = typer.Option(3, min=1, max=20)) -> None:
             pipeline.ai_call_count = len(rows)
             pipeline.error_count = errors
             pipeline.claim_count = claim_count
+            if claim_count and settings.community_shadow_enabled:
+                try:
+                    target_claim = session.scalar(select(Claim).order_by(Claim.id.desc()))
+                    if target_claim:
+                        target_paper = session.get(Paper, target_claim.paper_id)
+                        radar = session.scalar(
+                            select(RadarAssessment).where(
+                                RadarAssessment.paper_id == target_claim.paper_id
+                            )
+                        )
+                        target_theme = (
+                            session.get(ResearchTheme, radar.theme_id) if radar else None
+                        )
+                        shadow_provider = QuantStackExchangeProvider(
+                            api_key=(
+                                settings.stackexchange_api_key.get_secret_value()
+                                if settings.stackexchange_api_key
+                                else None
+                            ),
+                            timeout=settings.http_timeout_seconds,
+                            max_retries=settings.http_max_retries,
+                        )
+                        shadow_query = claim_driven_queries(
+                            target_claim.claim_text,
+                            theme_name=target_theme.name_en if target_theme else "",
+                        )[0]
+                        shadow_records = await shadow_provider.search(shadow_query, limit=5)
+                        shadow_stored = len(
+                            ShadowCommunityService(session).ingest(
+                                shadow_records,
+                                theme=target_theme,
+                                paper=target_paper,
+                                claim=target_claim,
+                            )
+                        )
+                        typer.echo(f"Community Shadow: {shadow_stored} observations")
+                except Exception as exc:
+                    # Community is a weak-signal sidecar.  Its outage must not
+                    # fail the formal Claim/Evidence stage.
+                    typer.echo(
+                        f"Community Shadow skipped: {type(exc).__name__}: {exc}", err=True
+                    )
             session.commit()
             typer.echo(f"Claims created: {claim_count} from {len(rows)} papers")
 
@@ -719,6 +786,83 @@ def validation_briefs(top: int = typer.Option(3, min=1, max=3)) -> None:
                 completed += 1
             RadarService(session).refresh_theme_counts()
             typer.echo(f"Research Briefs completed: {completed}/{len(candidates)}")
+
+    asyncio.run(run())
+
+
+@app.command("community-shadow")
+def community_shadow(
+    query: str | None = typer.Option(None, help="指定一个 Claim 驱动的社区攻击查询"),
+    limit: int = typer.Option(10, min=1, max=50),
+) -> None:
+    """Search Quantitative Finance StackExchange in isolated Shadow Mode.
+
+    Community text is stored as UNVERIFIED observations and can only create
+    proposed falsification tasks.  It never writes Claim, Evidence, or
+    ResearchCard state.
+    """
+    settings = get_settings()
+    if not settings.community_shadow_enabled:
+        typer.echo("Community Shadow Mode is disabled by configuration.")
+        return
+
+    async def run() -> None:
+        provider = QuantStackExchangeProvider(
+            api_key=(
+                settings.stackexchange_api_key.get_secret_value()
+                if settings.stackexchange_api_key
+                else None
+            ),
+            timeout=settings.http_timeout_seconds,
+            max_retries=settings.http_max_retries,
+        )
+        with SessionLocal() as session:
+            target_claim = None
+            target_paper = None
+            target_theme = None
+            if not query:
+                target_claim = session.scalar(
+                    select(Claim)
+                    .join(RadarAssessment, RadarAssessment.paper_id == Claim.paper_id)
+                    .where(RadarAssessment.decision == "DEEP")
+                    .order_by(Claim.id.desc())
+                )
+                if target_claim:
+                    target_paper = session.get(Paper, target_claim.paper_id)
+                    radar = session.scalar(
+                        select(RadarAssessment).where(
+                            RadarAssessment.paper_id == target_claim.paper_id
+                        )
+                    )
+                    target_theme = (
+                        session.get(ResearchTheme, radar.theme_id) if radar else None
+                    )
+                queries = claim_driven_queries(
+                    target_claim.claim_text if target_claim else "US equity anomaly",
+                    theme_name=target_theme.name_en if target_theme else "",
+                )
+            else:
+                queries = [query]
+            stored = 0
+            for search_query in queries:
+                records = await provider.search(search_query, limit=limit)
+                stored += len(
+                    ShadowCommunityService(session).ingest(
+                        records,
+                        theme=target_theme,
+                        paper=target_paper,
+                        claim=target_claim,
+                    )
+                )
+            observation_count = (
+                session.scalar(select(func.count()).select_from(CommunityObservation)) or 0
+            )
+            task_count = session.scalar(select(func.count()).select_from(FalsificationTask)) or 0
+            typer.echo(
+                f"Community Shadow complete: stored {stored}; "
+                f"observations {observation_count}; proposed tasks {task_count}; "
+                "formal Claim/Evidence unchanged"
+            )
 
     asyncio.run(run())
 
