@@ -4,9 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qri"
-version = "0.1.0"
+version = "0.2.0"
 description = "Quant Research Intelligence — auditable literature intelligence and candidate research question generation"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.13,<2",

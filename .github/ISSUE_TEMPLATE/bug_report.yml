@@ -1,0 +1,27 @@
+name: Bug report
+description: Report a reproducible problem in QRI
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please remove API keys, personal data, PDFs, and private research data before submitting.
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: What did you do, and what did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste a minimal redacted traceback or test output.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+    validations:
+      required: true

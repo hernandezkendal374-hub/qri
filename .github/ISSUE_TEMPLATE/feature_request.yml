@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest a focused improvement to QRI
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Research or engineering problem
+      description: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest version that would be useful.
+    validations:
+      required: true

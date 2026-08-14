@@ -1,5 +1,7 @@
 # QRI — Quant Research Intelligence
 
+[English README](README.en.md)
+
 量化论文情报与研究问题生成系统。QRI 把大量论文压缩成少量值得人工决策的 Research Brief，而不是逐篇生产研究问题。
 
 ## 产品定位
@@ -29,7 +31,7 @@ QRI 回答三个问题：什么值得研究、为什么值得研究、怎样证�
 
 ### 深度研究模式
 
-仅对 Top 0–3 获取合法全文，生成 Research Card、Claim、Evidence Pointer、Candidate Research Question 和 Research Validation Spec。
+仅对达到深研阈值的项目获取合法全文，数量受配置上限限制，也允许为 0；系统随后生成 Research Card、Claim、Evidence Pointer、Candidate Research Question 和 Research Validation Spec。
 
 ## 主题驱动的增量知识
 
@@ -161,3 +163,11 @@ ruff check .
 ```
 
 测试覆盖论文聚合、全文状态、证据定位、范围约束、漏斗恢复、雷达淘汰、主题归档、0–3 深研选择、验证方案和一次性人工决策。
+
+## 开源发布说明
+
+QRI 目前处于可运行的早期版本，欢迎研究者、数据工程师和量化开发者一起改进。公开仓库不包含本地 `.env`、数据库文件、下载的 PDF 或 `data/` 原始资料；请使用 `.env.example` 配置自己的环境。
+
+QRI 的输出是可审计的研究线索和验证说明，不是投资建议、交易信号或收益承诺。项目默认不连接券商、不下单，也不会把统计检验自动包装成可交易策略。任何进入下游量化系统的内容都必须经过人工审核。
+
+贡献流程、报告安全问题和本地开发约定分别见 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。项目采用 MIT License，见 [LICENSE](LICENSE)。

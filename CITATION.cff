@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If QRI helps your research, please cite the repository."
+title: "QRI — Quant Research Intelligence"
+type: software
+version: 0.2.0
+date-released: 2026-08-14
+license: MIT
+abstract: >-
+  An auditable research-intelligence system that turns quantitative-finance
+  literature into incremental evidence streams, falsifiable research briefs,
+  and human-reviewable validation specifications.
+authors:
+  - name: "QRI contributors"
