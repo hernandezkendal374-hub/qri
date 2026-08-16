@@ -699,7 +699,7 @@ def questions() -> None:
 
 
 @app.command("validation-briefs")
-def validation_briefs(top: int = typer.Option(3, min=1, max=3)) -> None:
+def validation_briefs(top: int = typer.Option(3, min=1, max=20)) -> None:
     """Automatically complete Research Briefs for only the highest-value deep questions."""
     settings = get_settings()
     if not settings.llm_base_url or not settings.llm_api_key:
