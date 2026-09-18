@@ -390,12 +390,18 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 )
                 or 0,
                 "new_unique_papers": stats["papers_today"],
+                # Count every row that reached Scout, not just the ones still
+                # sitting there.  prioritize() rewrites each SCOUT row to DEEP
+                # or ARCHIVED_AFTER_SCOUT, so a decision == "SCOUT" filter reads
+                # zero for the rest of the day once a funnel run completes.
                 "scout": session.scalar(
                     select(func.count())
                     .select_from(RadarAssessment)
                     .where(
                         RadarAssessment.assessed_at >= today_start,
-                        RadarAssessment.decision == "SCOUT",
+                        RadarAssessment.decision.in_(
+                            ("SCOUT", "DEEP", "ARCHIVED_AFTER_SCOUT")
+                        ),
                     )
                 )
                 or 0,
