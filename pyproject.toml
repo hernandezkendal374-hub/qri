@@ -48,3 +48,6 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
+# Routes retired to a read-only archive left ~175 lines of unreachable code
+# sitting behind unconditional returns.  Lint does not look for that; this does.
+warn_unreachable = true

@@ -49,15 +49,9 @@ from app.providers.papers.unpaywall import UnpaywallProvider
 from app.research_validation import ResearchValidationService
 from app.schemas.research import PaperResearchCard
 from app.scope.us_equity import SCOPE_VERSION
-from app.strategy.quick_backtest import (
-    DEFAULT_UNIVERSE,
-    evaluate_quick_result,
-    infer_strategy_profile,
-    run_quick_backtest,
-)
-from app.strategy.service import StrategyIncubationService
 
 APP_DIR = Path(__file__).resolve().parent
+IS_WINDOWS = sys.platform == "win32"
 
 
 def _launch_funnel_process(run_id: str) -> None:
@@ -85,44 +79,6 @@ def _launch_funnel_process(run_id: str) -> None:
         startupinfo=startup_info,
         start_new_session=sys.platform != "win32",
     )
-
-
-def _strategy_profile(question: ResearchQuestion, incubation: StrategyIncubation) -> str | None:
-    specification = incubation.specification_json or {}
-    direct = specification.get("executable_strategy") or {}
-    profile_text = " ".join(
-        str(value)
-        for value in (
-            question.question,
-            direct.get("strategy_name", ""),
-            direct.get("strategy_type", ""),
-            direct.get("one_sentence_rule", ""),
-            direct.get("signal_formula", ""),
-        )
-    )
-    return infer_strategy_profile(profile_text)
-
-
-def _mark_backtest_unavailable(incubation: StrategyIncubation) -> None:
-    specification = dict(incubation.specification_json or {})
-    specification.pop("quick_backtest", None)
-    specification["quick_backtest_unavailable"] = {
-        "status": "UNSUPPORTED_PROFILE",
-        "title": "暂无匹配的快速回测模型",
-        "reason": (
-            "当前快速引擎只支持纯价格动量和纯价格低波动；"
-            "本策略依赖额外条件或数据，不能用通用代理结果代替。"
-        ),
-        "supported_profiles": ["纯价格动量", "纯价格低波动"],
-    }
-    incubation.specification_json = specification
-
-
-def _backtest_is_ranking_eligible(backtest: dict[str, Any] | None) -> bool:
-    if not backtest:
-        return False
-    coverage = backtest.get("coverage") or {}
-    return bool(coverage.get("eligible_for_ranking", False))
 
 
 def _research_merit(session: Session, question: ResearchQuestion) -> dict[str, float]:
@@ -264,9 +220,8 @@ def _local_datetime_zh(value: datetime | None) -> str:
     return f"{local_value.month}月{local_value.day}日 {local_value:%H:%M}"
 
 
-def _daily_schedule_enabled() -> bool:
-    if sys.platform != "win32":
-        return False
+def _windows_scheduled_task_exists() -> bool:
+    """Query the Windows task scheduler.  Only called on win32."""
     try:
         result = subprocess.run(
             ["schtasks", "/Query", "/TN", DAILY_TASK_NAME],
@@ -277,6 +232,17 @@ def _daily_schedule_enabled() -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
+
+
+def _daily_schedule_enabled() -> bool:
+    # The scheduled funnel is a Windows-only convenience; every other platform
+    # drives it from cron or a systemd timer, so there is nothing to query.
+    # IS_WINDOWS goes through a variable on purpose: comparing sys.platform
+    # inline makes the type checker treat the rest of the body as dead code on
+    # whichever platform it happens to be analysing.
+    if not IS_WINDOWS:
+        return False
+    return _windows_scheduled_task_exists()
 
 
 def _fulltext_reason_zh(reason: str | None) -> str:
@@ -1146,168 +1112,26 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 },
             )
 
+    # Legacy strategy incubation and quick backtesting are a read-only archive.
+    # The stored records stay browsable at /legacy-strategies, but nothing may
+    # create or mutate them: QRI stops at a falsifiable research question and
+    # does not produce or score tradable strategies.
+
     @web.get("/strategies/{question_id}/backtest")
-    def quick_backtest_page(request: Request, question_id: int, ticker: str = "AAPL"):
+    def quick_backtest_page(question_id: int) -> RedirectResponse:
         return RedirectResponse("/legacy-strategies", status_code=303)
-        ticker = ticker.upper()
-        with session_factory() as session:
-            question = session.get(ResearchQuestion, question_id)
-            incubation = session.scalar(
-                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
-            )
-            if not question or not incubation:
-                raise HTTPException(status_code=404, detail="策略不存在")
-            result = incubation.specification_json.get("quick_backtest")
-            universe = result.get("universe", DEFAULT_UNIVERSE) if result else DEFAULT_UNIVERSE
-            if ticker not in universe:
-                ticker = universe[0]
-            return templates.TemplateResponse(
-                request=request,
-                name="backtest.html",
-                context={
-                    "question": question,
-                    "incubation": incubation,
-                    "result": result,
-                    "evaluation": evaluate_quick_result(result) if result else None,
-                    "ticker": ticker,
-                    "universe": universe,
-                    "active": "",
-                },
-            )
 
     @web.post("/strategies/{question_id}/backtest/run")
-    async def run_quick_backtest_route(question_id: int):
+    def run_quick_backtest_route(question_id: int) -> None:
         raise HTTPException(status_code=410, detail="快速回测已移出 QRI 主流程")
-        with session_factory() as session:
-            question = session.get(ResearchQuestion, question_id)
-            incubation = session.scalar(
-                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
-            )
-            if not question or not incubation:
-                raise HTTPException(status_code=404, detail="策略不存在")
-            profile = _strategy_profile(question, incubation)
-            if profile is None:
-                _mark_backtest_unavailable(incubation)
-                session.commit()
-                return RedirectResponse(f"/questions#question-{question_id}", status_code=303)
-        try:
-            result = await run_quick_backtest(profile)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail="公开行情暂时不可用，请稍后重试") from exc
-        with session_factory() as session:
-            incubation = session.scalar(
-                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
-            )
-            if not incubation:
-                raise HTTPException(status_code=404, detail="策略不存在")
-            specification = dict(incubation.specification_json)
-            specification["quick_backtest"] = result
-            specification.pop("quick_backtest_unavailable", None)
-            incubation.specification_json = specification
-            session.commit()
-        return RedirectResponse(f"/strategies/{question_id}/backtest", status_code=303)
 
     @web.post("/questions/{question_id}/advance")
-    async def advance_question_to_backtest(question_id: int):
+    def advance_question_to_backtest(question_id: int) -> None:
         raise HTTPException(status_code=410, detail="请改用研究验证方案")
-        settings = get_settings()
-        with session_factory() as session:
-            question = session.get(ResearchQuestion, question_id)
-            if not question:
-                raise HTTPException(status_code=404, detail="研究问题不存在")
-            incubation = session.scalar(
-                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
-            )
-            if not incubation:
-                if not settings.llm_base_url or not settings.llm_api_key:
-                    raise HTTPException(status_code=503, detail="AI 模型尚未配置")
-                translation = session.scalar(
-                    select(QuestionTranslation).where(
-                        QuestionTranslation.question_id == question_id
-                    )
-                )
-                handoff = _handoff_package(session, question, translation)
-                provider = OpenAICompatibleProvider(
-                    settings.llm_base_url,
-                    settings.llm_api_key.get_secret_value(),
-                    timeout=max(settings.http_timeout_seconds, 600.0),
-                )
-                try:
-                    incubation = await StrategyIncubationService(
-                        session, provider, settings.strategy_model
-                    ).generate(question, handoff)
-                except Exception as exc:
-                    raise HTTPException(status_code=502, detail="直接策略生成失败") from exc
-            profile = _strategy_profile(question, incubation)
-            if profile is None:
-                _mark_backtest_unavailable(incubation)
-                session.commit()
-                return RedirectResponse(f"/questions#question-{question_id}", status_code=303)
-        try:
-            result = await run_quick_backtest(profile)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail="公开行情暂时不可用，请稍后重试") from exc
-        with session_factory() as session:
-            incubation = session.scalar(
-                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
-            )
-            if not incubation:
-                raise HTTPException(status_code=404, detail="策略不存在")
-            specification = dict(incubation.specification_json)
-            specification["quick_backtest"] = result
-            specification.pop("quick_backtest_unavailable", None)
-            incubation.specification_json = specification
-            session.commit()
-        return RedirectResponse(f"/strategies/{question_id}/backtest", status_code=303)
 
     @web.post("/strategies/{question_id}/reconstruct")
-    async def reconstruct_strategy(question_id: int):
+    def reconstruct_strategy(question_id: int) -> None:
         raise HTTPException(status_code=410, detail="策略重构已移出 QRI")
-        with session_factory() as session:
-            question = session.get(ResearchQuestion, question_id)
-            incubation = session.scalar(
-                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
-            )
-            if not question or not incubation:
-                raise HTTPException(status_code=404, detail="策略不存在")
-            previous = incubation.specification_json.get("quick_backtest")
-            if not previous:
-                raise HTTPException(status_code=409, detail="请先完成首次快速回测")
-            base_profile = _strategy_profile(question, incubation)
-            if base_profile is None:
-                _mark_backtest_unavailable(incubation)
-                session.commit()
-                return RedirectResponse(f"/questions#question-{question_id}", status_code=303)
-            profile = f"{base_profile}_v2"
-        try:
-            result = await run_quick_backtest(profile)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail="重构回测失败，请稍后重试") from exc
-        result["reconstruction"] = {
-            "version": 2,
-            "previous_metrics": previous["metrics"],
-            "previous_profile": previous.get("profile", base_profile),
-            "changes": [
-                "每侧持仓由2只增加至3只，降低单股集中度",
-                "总多空敞口由100%降至80%",
-                "信号窗口改为更灵敏且更分散的第二版参数",
-                "保留原成本和借券假设，保证前后可比",
-            ],
-        }
-        with session_factory() as session:
-            incubation = session.scalar(
-                select(StrategyIncubation).where(StrategyIncubation.question_id == question_id)
-            )
-            if not incubation:
-                raise HTTPException(status_code=404, detail="策略不存在")
-            specification = dict(incubation.specification_json)
-            history = list(specification.get("quick_backtest_history", []))
-            history.append(previous)
-            specification["quick_backtest_history"] = history[-5:]
-            specification["quick_backtest"] = result
-            incubation.specification_json = specification
-            session.commit()
-        return RedirectResponse(f"/strategies/{question_id}/backtest", status_code=303)
 
     @web.post("/questions/{question_id}/archive")
     def archive_question(question_id: int):
@@ -1434,31 +1258,8 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         )
 
     @web.post("/questions/{question_id}/incubate")
-    async def incubate_question(question_id: int):
+    def incubate_question(question_id: int) -> None:
         raise HTTPException(status_code=410, detail="策略孵化已移出 QRI")
-        settings = get_settings()
-        if not settings.llm_base_url or not settings.llm_api_key:
-            raise HTTPException(status_code=503, detail="AI 模型尚未配置")
-        with session_factory() as session:
-            question = session.get(ResearchQuestion, question_id)
-            if not question:
-                raise HTTPException(status_code=404, detail="研究问题不存在")
-            translation = session.scalar(
-                select(QuestionTranslation).where(QuestionTranslation.question_id == question_id)
-            )
-            handoff = _handoff_package(session, question, translation)
-            provider = OpenAICompatibleProvider(
-                settings.llm_base_url,
-                settings.llm_api_key.get_secret_value(),
-                timeout=max(settings.http_timeout_seconds, 600.0),
-            )
-            try:
-                await StrategyIncubationService(
-                    session, provider, settings.strategy_model
-                ).generate(question, handoff)
-            except Exception as exc:
-                raise HTTPException(status_code=502, detail="策略孵化方案生成失败") from exc
-        return RedirectResponse(f"/questions#strategy-incubation-{question_id}", status_code=303)
 
     @web.get("/questions/{question_id}/strategy-spec.json")
     def strategy_spec(question_id: int):
