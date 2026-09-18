@@ -199,7 +199,7 @@ def orchestrator(
         parser=PyMuPDFParser(),
         unpaywall=UnpaywallProvider(None),
         storage_dir=storage,
-        primary_model="claude-sonnet-4-6",
+        primary_model="claude-sonnet-5",
         reasoning_model="gpt-5.4",
     )
 

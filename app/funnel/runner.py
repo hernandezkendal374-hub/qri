@@ -25,61 +25,72 @@ from app.models import (
 from app.models.entities import FullTextStatus
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_SETTINGS = get_settings()
-FUNNEL_STAGES = (
-    (
-        "DISCOVERY",
-        f"雷达采集并去重 {_SETTINGS.daily_scan_target} 项",
-        ("daily", "--target", str(_SETTINGS.daily_scan_target)),
-        Paper,
-    ),
-    (
-        "RADAR",
-        "增量价值筛选（阈值 + 上限）",
-        ("radar", "--scout-max", str(_SETTINGS.scout_max_items)),
-        RadarAssessment,
-    ),
-    (
-        "SCOUT",
-        "侦察研究价值与投资相关性",
-        ("briefs", "--top", str(_SETTINGS.scout_max_items)),
-        AbstractBrief,
-    ),
-    (
-        "DEEP_SELECTION",
-        "按深研阈值与上限选择",
-        ("prioritize", "--deep", str(_SETTINGS.deep_research_max_items)),
-        RadarAssessment,
-    ),
-    (
-        "FULLTEXT",
-        "仅获取深研对象合法全文",
-        ("fetch", "--top", str(_SETTINGS.deep_research_max_items)),
-        Paper,
-    ),
-    (
-        "RESEARCH_CARD",
-        "深度研究与证据卡",
-        ("analyze", "--top", str(_SETTINGS.deep_research_max_items)),
-        ResearchCard,
-    ),
-    (
-        "CLAIM_EVIDENCE",
-        "提取 Claim 与 Evidence",
-        ("claims", "--top", str(_SETTINGS.deep_research_max_items)),
-        Claim,
-    ),
-    ("QUESTIONS", "只生成高价值候选问题", ("questions",), ResearchQuestion),
-    (
-        "RESEARCH_BRIEF",
-        "自动完成 Research Brief",
-        ("validation-briefs", "--top", str(_SETTINGS.deep_research_max_items)),
-        ResearchValidationSpec,
-    ),
-)
+FunnelStage = tuple[str, str, tuple[str, ...], type]
+
+
+def funnel_stages() -> tuple[FunnelStage, ...]:
+    """Build the stage table from the current settings.
+
+    Read per call rather than captured at import time, so changing a
+    threshold in .env does not require restarting the process to take
+    effect, and tests can override the settings.
+    """
+    settings = get_settings()
+    return (
+        (
+            "DISCOVERY",
+            f"雷达采集并去重 {settings.daily_scan_target} 项",
+            ("daily", "--target", str(settings.daily_scan_target)),
+            Paper,
+        ),
+        (
+            "RADAR",
+            "增量价值筛选（阈值 + 上限）",
+            ("radar", "--scout-max", str(settings.scout_max_items)),
+            RadarAssessment,
+        ),
+        (
+            "SCOUT",
+            "侦察研究价值与投资相关性",
+            ("briefs", "--top", str(settings.scout_max_items)),
+            AbstractBrief,
+        ),
+        (
+            "DEEP_SELECTION",
+            "按深研阈值与上限选择",
+            ("prioritize", "--deep", str(settings.deep_research_max_items)),
+            RadarAssessment,
+        ),
+        (
+            "FULLTEXT",
+            "仅获取深研对象合法全文",
+            ("fetch", "--top", str(settings.deep_research_max_items)),
+            Paper,
+        ),
+        (
+            "RESEARCH_CARD",
+            "深度研究与证据卡",
+            ("analyze", "--top", str(settings.deep_research_max_items)),
+            ResearchCard,
+        ),
+        (
+            "CLAIM_EVIDENCE",
+            "提取 Claim 与 Evidence",
+            ("claims", "--top", str(settings.deep_research_max_items)),
+            Claim,
+        ),
+        ("QUESTIONS", "只生成高价值候选问题", ("questions",), ResearchQuestion),
+        (
+            "RESEARCH_BRIEF",
+            "自动完成 Research Brief",
+            ("validation-briefs", "--top", str(settings.deep_research_max_items)),
+            ResearchValidationSpec,
+        ),
+    )
 
 
 def create_funnel_run(session_factory: Callable[[], Session]) -> tuple[PipelineRun, bool]:
+    settings = get_settings()
     with session_factory() as session:
         running = session.scalar(
             select(PipelineRun)
@@ -90,9 +101,9 @@ def create_funnel_run(session_factory: Callable[[], Session]) -> tuple[PipelineR
             return running, False
         run = PipelineRun(
             query=(
-                f"[INCREMENTAL_VALUE] {_SETTINGS.daily_scan_target} → threshold scout "
-                f"(max {_SETTINGS.scout_max_items}) → deep "
-                f"(max {_SETTINGS.deep_research_max_items})"
+                f"[INCREMENTAL_VALUE] {settings.daily_scan_target} → threshold scout "
+                f"(max {settings.scout_max_items}) → deep "
+                f"(max {settings.deep_research_max_items})"
             ),
             run_type="DAILY_FUNNEL",
             status="RUNNING",
@@ -102,7 +113,7 @@ def create_funnel_run(session_factory: Callable[[], Session]) -> tuple[PipelineR
         session.flush()
         session.add_all(
             PipelineStageRun(run_id=run.run_id, stage=code, status="PENDING")
-            for code, _, _, _ in FUNNEL_STAGES
+            for code, _, _, _ in funnel_stages()
         )
         session.commit()
         return run, True
@@ -116,7 +127,7 @@ def execute_funnel(
 ) -> None:
     python_executable = python_executable or sys.executable
     failures = 0
-    for code, _, arguments, model in FUNNEL_STAGES:
+    for code, _, arguments, model in funnel_stages():
         if _stage_status(session_factory, run_id, code) == "SUCCESS":
             continue
         stage_start_count = _model_count(session_factory, model, code)

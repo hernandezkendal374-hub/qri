@@ -12,14 +12,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.evidence.verification import field_verification_status
 from app.extraction.abstract_brief import AbstractBriefExtractor
 from app.fulltext.downloader import InvalidFullTextError, PDFDownloader
-from app.fulltext.service import FullTextService
-from app.funnel.runner import FUNNEL_STAGES, create_funnel_run
+from app.fulltext.service import FullTextResult, FullTextService
+from app.funnel.runner import create_funnel_run
+from app.funnel.runner import funnel_stages as build_funnel_stages
 from app.models import (
     AbstractBrief,
     AICall,
@@ -477,7 +479,7 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
                 }
             funnel_stages = [
                 {"code": code, "label": label, "row": stage_rows.get(code)}
-                for code, label, _, _ in FUNNEL_STAGES
+                for code, label, _, _ in build_funnel_stages()
             ]
 
             def stage_created(stage_code: str) -> int:
@@ -834,22 +836,37 @@ def create_app(session_factory: Callable[[], Session] = SessionLocal) -> FastAPI
         length = request.headers.get("content-length")
         if length and int(length) > max_bytes:
             raise HTTPException(status_code=413, detail="PDF 不能超过 50 MB")
-        content = await request.body()
-        with session_factory() as session:
-            paper = session.get(Paper, paper_id)
-            if not paper:
-                raise HTTPException(status_code=404, detail="Paper not found")
-            service = FullTextService(
-                session,
-                PDFDownloader(max_bytes=max_bytes),
-                PyMuPDFParser(),
-                UnpaywallProvider(None),
-                storage_dir=Path("data/pdfs"),
-            )
-            try:
-                result = service.ingest_uploaded_pdf(paper, content)
-            except (InvalidFullTextError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Read in chunks and stop at the cap. Buffering the whole body first
+        # would let a request without a content-length header exceed it.
+        chunks: list[bytes] = []
+        received = 0
+        async for chunk in request.stream():
+            received += len(chunk)
+            if received > max_bytes:
+                raise HTTPException(status_code=413, detail="PDF 不能超过 50 MB")
+            chunks.append(chunk)
+        content = b"".join(chunks)
+
+        def _ingest() -> FullTextResult:
+            with session_factory() as session:
+                paper = session.get(Paper, paper_id)
+                if not paper:
+                    raise HTTPException(status_code=404, detail="Paper not found")
+                service = FullTextService(
+                    session,
+                    PDFDownloader(max_bytes=max_bytes),
+                    PyMuPDFParser(),
+                    UnpaywallProvider(None),
+                    storage_dir=Path("data/pdfs"),
+                )
+                try:
+                    return service.ingest_uploaded_pdf(paper, content)
+                except (InvalidFullTextError, ValueError) as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # Parsing a 50 MB PDF is synchronous and slow enough to stall every
+        # other request if it runs on the event loop.
+        result = await run_in_threadpool(_ingest)
         return JSONResponse(
             {"status": "ok", "pages": result.page_count, "characters": result.character_count}
         )
