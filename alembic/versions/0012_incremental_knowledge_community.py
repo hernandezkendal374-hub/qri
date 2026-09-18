@@ -218,8 +218,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    drop_table_if_present("community_observations")
+    # falsification_tasks.observation_id references community_observations, so
+    # the dependent table has to go first. SQLite does not enforce foreign keys
+    # by default and let the wrong order pass; PostgreSQL rejects it.
     drop_table_if_present("falsification_tasks")
+    drop_table_if_present("community_observations")
     drop_table_if_present("investment_relevance")
     drop_table_if_present("scout_assessments")
     drop_table_if_present("knowledge_deltas")

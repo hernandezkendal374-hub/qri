@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   test:
+    name: Tests, lint and types (SQLite)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -28,3 +29,112 @@ jobs:
         run: ruff check .
       - name: Type-check application
         run: mypy app
+
+  postgres:
+    name: Tests on PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Production targets PostgreSQL while the suite runs on SQLite, so dialect
+    # differences (JSON handling, enum types, ALTER semantics) would otherwise
+    # only surface in a real deployment.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: qri
+          POSTGRES_USER: qri
+          POSTGRES_PASSWORD: qri
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qri"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://qri:qri@localhost:5432/qri
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Apply migrations to an empty PostgreSQL database
+        run: alembic upgrade head
+      - name: Verify the migrated schema matches the ORM models
+        run: alembic check
+      - name: Downgrade all the way back to base
+        # PostgreSQL enforces foreign keys and constraint-backed indexes that
+        # SQLite ignores, so the downgrade path has to be exercised here.
+        run: alembic downgrade base
+      - name: Upgrade again from the downgraded database
+        run: alembic upgrade head
+      - name: Seed and inspect the demo dataset
+        run: python -m app.cli demo
+      - name: Run the suite
+        run: pytest -q
+
+  migrations:
+    name: Migration chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # `alembic upgrade head` used to crash on any fresh database, which is the
+    # first command the README tells a new user to run. Nothing in CI executed
+    # a migration, so it went unnoticed.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Upgrade a fresh database to head
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: sqlite:///./ci-migrations.db
+      - name: Verify the schema matches the ORM models
+        run: alembic check
+        env:
+          DATABASE_URL: sqlite:///./ci-migrations.db
+      - name: Verify the upgrade is idempotent
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: sqlite:///./ci-migrations.db
+      - name: Downgrade all the way back to base
+        run: alembic downgrade base
+        env:
+          DATABASE_URL: sqlite:///./ci-migrations.db
+      - name: Upgrade again from the downgraded database
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: sqlite:///./ci-migrations.db
+
+  demo:
+    name: Demo dataset
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The demo path is how a new user first sees the project, so a break in it
+    # should fail the build rather than the first person who tries it.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Migrate and seed exactly as the README instructs
+        run: |
+          alembic upgrade head
+          python -m app.cli demo
+        env:
+          DATABASE_URL: sqlite:///./ci-demo.db

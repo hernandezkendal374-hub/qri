@@ -11,7 +11,6 @@ import sqlalchemy as sa
 from alembic import op
 from app.db.migration_guards import (
     drop_column_if_present,
-    drop_index_if_present,
     drop_table_if_present,
 )
 
@@ -61,8 +60,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    drop_index_if_present("pipeline_stage_runs", "uq_pipeline_stage_run")
-    drop_index_if_present("pipeline_stage_runs", "ix_pipeline_stage_runs_run_id")
+    # Dropping the table takes its indexes and constraints with it. Dropping
+    # the indexes first fails on PostgreSQL, where uq_pipeline_stage_run is the
+    # index backing a unique constraint and cannot be dropped on its own.
     drop_table_if_present("pipeline_stage_runs")
     for name in ("current_stage", "status", "run_type"):
         drop_column_if_present("pipeline_runs", name)
