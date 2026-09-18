@@ -29,7 +29,10 @@ def test_all_tables_create_in_sqlite() -> None:
 
 def test_settings_do_not_require_secrets() -> None:
     settings = Settings(_env_file=None)
-    assert settings.primary_model == "claude-sonnet-4-6"
-    assert settings.reasoning_model == "claude-sonnet-4-6"
-    assert settings.strategy_model == "gpt-5.6-sol"
+    assert settings.primary_model == "claude-sonnet-5"
+    assert settings.reasoning_model == "claude-sonnet-5"
+    assert settings.validation_model == "claude-sonnet-5"
     assert settings.llm_api_key is None
+    # No vendor price table is shipped, so costs stay unpriced until configured.
+    assert settings.input_cost_per_million_tokens == 0.0
+    assert settings.output_cost_per_million_tokens == 0.0

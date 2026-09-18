@@ -9,6 +9,10 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.migration_guards import (
+    drop_column_if_present,
+    drop_table_if_present,
+)
 
 revision: str = "0003"
 down_revision: str | None = "0002"
@@ -56,13 +60,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
-    if inspector.has_table("pipeline_stage_runs"):
-        op.drop_index("uq_pipeline_stage_run", table_name="pipeline_stage_runs")
-        op.drop_index("ix_pipeline_stage_runs_run_id", table_name="pipeline_stage_runs")
-        op.drop_table("pipeline_stage_runs")
-    columns = {column["name"] for column in inspector.get_columns("pipeline_runs")}
+    # Dropping the table takes its indexes and constraints with it. Dropping
+    # the indexes first fails on PostgreSQL, where uq_pipeline_stage_run is the
+    # index backing a unique constraint and cannot be dropped on its own.
+    drop_table_if_present("pipeline_stage_runs")
     for name in ("current_stage", "status", "run_type"):
-        if name in columns:
-            op.drop_column("pipeline_runs", name)
+        drop_column_if_present("pipeline_runs", name)

@@ -1,112 +1,147 @@
 # QRI — Quant Research Intelligence
 
-[English README](README.en.md)
+**Turn a firehose of quantitative-finance papers into a handful of falsifiable research questions, each carrying the verbatim evidence behind it.**
 
-量化论文情报与研究问题生成系统。QRI 把大量论文压缩成少量值得人工决策的 Research Brief，而不是逐篇生产研究问题。
+[简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · MIT licensed
 
-## 产品定位
+QRI scans roughly 300 papers a day and compresses them into a small number of
+Research Briefs worth a human decision. It answers three questions — what is
+worth researching, why, and what result would prove it wrong — and it stops
+there. It does not generate trading strategies, size positions, or dress a
+statistical test up as investment advice.
 
-QRI 回答三个问题：什么值得研究、为什么值得研究、怎样证伪。它不负责生成可交易策略，不决定仓位、敞口或执行方式，也不把统计检验包装成投资建议。
+![Today's research radar](docs/screenshots/dashboard.png)
 
-## 三速研究引擎
+*The daily radar: 8 papers scanned in this demo dataset, 3 reaching Scout, 2
+reaching deep research, and one Research Brief waiting on a human decision.*
 
-```text
-每天扫描约 300 项研究
-  → 雷达模式：Title + Abstract + Metadata，无 AI 快筛
-  → 侦察模式：增量研究价值阈值 + 上限（不填满配额）
-  → 深度研究：深研阈值 + 上限，允许为 0
-  → Research Brief：问题、反证与 Validation Spec
-  → 一次人工 Gate：批准 / 暂缓 / 拒绝
+## See it in 60 seconds
+
+No PostgreSQL, no API key, no network access. The demo dataset is synthetic —
+the papers, authors and numbers are invented — but it exercises the same code
+paths as a real run.
+
+```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+alembic upgrade head
+qri demo
+uvicorn app.main:app --reload
 ```
 
-没有候选达到阈值时，系统明确显示“今日无高价值新增研究问题”，不会为了填满日报而强行生成内容。
+Then open <http://127.0.0.1:8000/dashboard>.
 
-### 雷达模式
+> The web UI binds to localhost and has **no authentication**. Several
+> endpoints spend money on model calls and start background processes, so do
+> not expose the port to an untrusted network.
 
-低成本检查相关性、增量价值、Claim 冲突、证伪价值、投资相关性提示和重复知识惩罚。`LOW_INCREMENTAL_VALUE`、`NO_MATERIAL_CHANGE` 直接归档，不获取全文、不调用高阶模型。
+## What makes it different
 
-### 侦察模式
+Most literature tools summarise. QRI is built around four constraints that are
+enforced in code, not just stated in a README:
 
-只处理达到 Scout 阈值的项目，最多不超过上限，生成摘要级中文解读，回答“它改变了我们已经知道的什么”。之后再次按 Research Value + Investment Relevance 选择深研，达到阈值的项目才进入，数量可以为 0。
+**Evidence beats summary.** A field on a Research Card is `UNVERIFIED` unless a
+quote supporting it occurs *verbatim* in the parsed full text. The locator
+resolves each quote to a page and character offset and cross-checks the page
+and document offsets against each other; a quote it cannot anchor raises rather
+than being stored. See [`app/evidence/locator.py`](app/evidence/locator.py).
 
-### 深度研究模式
+**Questions beat conclusions.** An author's claim is recorded as an
+`AUTHOR_CLAIM`, never as a system fact. Every extraction prompt says so.
 
-仅对达到深研阈值的项目获取合法全文，数量受配置上限限制，也允许为 0；系统随后生成 Research Card、Claim、Evidence Pointer、Candidate Research Question 和 Research Validation Spec。
+**Falsification first.** A Research Brief is incomplete until it states what
+result would overturn the hypothesis, which biases threaten it, and what the
+minimum data requirement is.
 
-## 主题驱动的增量知识
+**A statistical test is not a strategy.** Regressions, portfolio sorts, placebo
+and out-of-sample tests are research instruments. Nothing reaches a downstream
+system without a human approving it — `export_candidate_question()` refuses any
+question that is not `HUMAN_APPROVED`.
 
-运行单位由“单篇论文”升级为 `ResearchTheme → Evidence Stream → Research Question`。当前主题包括动量、价值、质量、低风险、微观结构、做空约束、机构与中介资本、机器学习资产定价、事件与信息扩散等。
+![A complete Research Brief](docs/screenshots/research-brief.png)
 
-每篇新论文都会被归入主题，并标记为：
+## How the funnel works
 
-- `NO_MATERIAL_CHANGE` / `LOW_INCREMENTAL_VALUE`：未改变现有知识，自动归档
-- `NEW_CONDITION`：已有主题的新样本、时期或实现约束
-- `NEW_EVIDENCE`：为主题补充有用证据
-- `NEW_CONFLICT`：可能改变已有观点的重要冲突
+```text
+~300 papers scanned per day
+  → Radar    title + abstract + metadata, keyword heuristics, no AI calls
+  → Scout    above the incremental-value threshold, capped, summary-level reading
+  → Deep     above the deep-research threshold, capped, may legitimately be 0
+  → Research Brief: question, counter-evidence, and a validation spec
+  → One human gate: approve / defer / reject
+```
 
-每次运行都会留下 `KnowledgeDelta`，因此主题只处理“认知发生了什么变化”，不会每天重复研究整个 Momentum 或 Value 主题。
+Thresholds with caps, not quotas. When nothing clears the bar the dashboard
+says so instead of manufacturing a daily digest.
 
-## Research Brief
+**Radar** is a deliberately cheap first pass: keyword and Jaccard-similarity
+heuristics over title and abstract, no model calls. The scores order candidates;
+they are not confidence estimates. `LOW_INCREMENTAL_VALUE` and
+`NO_MATERIAL_CHANGE` are archived without fetching full text.
 
-完整 Brief 包含：
+**Scout** reads only what cleared the threshold and answers "what does this
+change about what we already knew".
 
-- 普通人能看懂的一句话问题
-- 学术定义版本
-- 研究对象、经济机制与反向机制
-- Claim / Evidence 证据链
-- 变量、样本、PIT、统计检验与样本外设计
-- 反证条件、偏差风险和最低数据需求
+**Deep research** fetches legally available full text for the few papers that
+clear the deep threshold, then produces the Research Card, claims, evidence
+pointers, candidate questions and validation spec.
 
-机器自动完成整份 Brief。人工只在出口做一次决定：`批准进入 Quant System / 暂缓 / 拒绝`。
+## Themes, not papers
 
-## 不可突破的边界
+The unit of work is `ResearchTheme → Evidence Stream → Research Question`, so
+the system tracks what changed rather than re-reading the momentum literature
+every morning. Each paper lands in a theme and is marked `NO_MATERIAL_CHANGE`,
+`LOW_INCREMENTAL_VALUE`, `NEW_CONDITION`, `NEW_EVIDENCE` or `NEW_CONFLICT`, and
+every run leaves a `KnowledgeDelta` behind.
 
-- **Evidence > Summary**：重要字段没有原文证据即为 `UNVERIFIED`。
-- **Question > Conclusion**：作者主张不是系统结论。
-- **Falsification First**：验证方案必须说明什么结果会推翻假设。
-- **Statistical Test ≠ Strategy**：回归、组合排序、安慰剂和样本外检验是研究工具。
-- 只有人工批准的 Brief 可以导出到下游系统。
-- QRI 与下游美股量化系统保持数据隔离。
+![Research themes](docs/screenshots/themes.png)
 
-旧版策略孵化和快速回测记录不会删除，但只作为隐藏的只读档案保存，不参与雷达、排名、审核或导出。
+## Community attack radar (shadow mode)
 
-## 每日研究价值
+A separate provider reads the Quantitative Finance StackExchange API for weak
+signals that a published result does not survive contact with implementation.
+Forum text is treated as `UNTRUSTED_EXTERNAL_CONTENT` throughout: it is never
+executed, never followed to external links, never admitted into claims or
+evidence, and never allowed to change the daily ranking. It can only produce
+`CommunityObservation` rows (`UNVERIFIED` by default) and propose a
+`FalsificationTask` for a human to review.
 
-排名不读取策略收益或回测指标，只依据新颖度、证据质量、证据冲突度、可证伪性、可检验性和数据可得性。问题生成还必须通过最低研究优先级与可检验性阈值。
+![Community attack radar](docs/screenshots/community-attack-radar.png)
 
-## 论文来源
+## Paper sources
 
-发现层聚合 arXiv、OpenAlex、Crossref 和 Semantic Scholar，并使用 Unpaywall 补充合法开放全文。单一来源失败不会阻断其他来源。仅有摘要时明确标记为 `ABSTRACT_ONLY`，不会声称已经读取全文。
+Discovery aggregates arXiv, OpenAlex, Crossref and Semantic Scholar, with
+Unpaywall for legal open-access full text. One source failing does not block
+the others. Abstract-only records are marked `ABSTRACT_ONLY` rather than
+claiming the full text was read.
 
-## 社区攻击雷达（Shadow Mode）
+## Running it for real
 
-当前只接 Quantitative Finance StackExchange 官方 API，作为独立 `ResearchSourceProvider`。论坛正文始终是 `UNTRUSTED_EXTERNAL_CONTENT`：不执行其中代码、不自动访问外链、不进入 Claim / Evidence、不改变正式每日排名。它只生成默认 `UNVERIFIED` 的 `CommunityObservation`，并可提出待人工审核的 `FalsificationTask`。页面：`/community-attack-radar`。
+Requires Python 3.12+. Copy `.env.example` to `.env` and set a database URL and
+an OpenAI-compatible model endpoint.
 
-## 本地运行
-
-需要 Python 3.12+。复制 `.env.example` 为 `.env`，配置数据库和 OpenAI-compatible 模型接口。
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+```bash
+docker compose up -d postgres      # or point DATABASE_URL at your own
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-主要页面：
+### Pages
 
-- `/dashboard`：今日研究雷达、漏斗进度与出口决策
-- `/papers`：论文库
-- `/claims`：作者主张与原文证据
-- `/questions`：完整 Research Brief
-- `/daily-best`：Research Brief 历史归档
-- `/themes`：长期维护的 Research Theme 与 Knowledge Delta
-- `/community-attack-radar`：社区弱信号和证伪任务（Shadow Mode）
+| Path | What it shows |
+| --- | --- |
+| `/dashboard` | Today's radar, funnel progress, and the export decision |
+| `/papers` | The paper library |
+| `/claims` | Author claims beside their verbatim evidence |
+| `/questions` | Full Research Briefs |
+| `/daily-best` | The Research Brief archive |
+| `/themes` | Long-lived themes and knowledge deltas |
+| `/community-attack-radar` | Community weak signals (shadow mode) |
 
-## 命令行
+### CLI
 
-```powershell
+```bash
+qri demo                                 # synthetic dataset, no network needed
 qri daily --target 300
 qri radar --scout-max 30 --threshold 0.48
 qri briefs --top 30
@@ -119,19 +154,20 @@ qri validation-briefs --top 3
 qri community-shadow --query "momentum transaction cost replication"
 ```
 
-`qri daily-funnel` 会按上述顺序自动运行，并支持从失败阶段恢复。
+`qri daily-funnel` runs the stages in order and resumes from a failed stage.
 
-## 模型配置
+### Configuration
 
 ```env
-PRIMARY_MODEL=claude-sonnet-4-6
-REASONING_MODEL=claude-sonnet-4-6
-VALIDATION_MODEL=claude-sonnet-4-6
+PRIMARY_MODEL=claude-sonnet-5       # scouting and paper analysis
+REASONING_MODEL=claude-sonnet-5     # question generation
+VALIDATION_MODEL=claude-sonnet-5    # research validation specs
 ```
 
-雷达快筛不调用 AI；`PRIMARY_MODEL` 用于侦察与论文分析，`REASONING_MODEL` 用于问题生成，`VALIDATION_MODEL` 用于 Research Validation Spec。`STRATEGY_MODEL` 仅为旧数据兼容保留。
+Any model id your OpenAI-compatible gateway exposes will work. Radar makes no
+model calls at all.
 
-增量漏斗可以通过以下环境变量调整。它们都是阈值和安全上限，不是必须填满的数量：
+Funnel controls are thresholds and safety caps, never quotas to fill:
 
 ```env
 SCOUT_SCORE_THRESHOLD=0.48
@@ -142,32 +178,51 @@ DAILY_SCAN_TARGET=300
 COMMUNITY_SHADOW_ENABLED=true
 ```
 
-## 数据库升级
+Model calls are recorded in an `ai_calls` audit table. QRI ships no vendor
+price table, so set your own rates to get costs alongside them:
 
-```powershell
-alembic upgrade head
+```env
+INPUT_COST_PER_MILLION_TOKENS=0
+OUTPUT_COST_PER_MILLION_TOKENS=0
 ```
 
-- `0010`：双版本问题与 `research_validation_specs`
-- `0011`：`research_themes` 与 `radar_assessments`
-- `0012`：增量知识 `knowledge_deltas`、`scout_assessments`、`investment_relevance`、社区 Shadow Mode 表
-- `0013`：Research Question 优先级分层 `P0`–`P3`
+## Development
 
-旧论文、问题、策略与回测数据均保留。
-
-## 测试
-
-```powershell
-pytest -q
-ruff check .
+```bash
+pytest -q        # tests
+ruff check .     # lint
+mypy app         # types
 ```
 
-测试覆盖论文聚合、全文状态、证据定位、范围约束、漏斗恢复、雷达淘汰、主题归档、0–3 深研选择、验证方案和一次性人工决策。
+CI additionally runs the migration chain (upgrade, schema-vs-model check,
+idempotent re-upgrade, downgrade to base, upgrade again), the full suite
+against PostgreSQL, and the demo path a new user follows.
 
-## 开源发布说明
+Layout:
 
-QRI 目前处于可运行的早期版本，欢迎研究者、数据工程师和量化开发者一起改进。公开仓库不包含本地 `.env`、数据库文件、下载的 PDF 或 `data/` 原始资料；请使用 `.env.example` 配置自己的环境。
+```text
+app/web/         HTTP routes, one module per area of the UI
+app/radar/       incremental-value triage
+app/evidence/    verbatim quote anchoring
+app/question_factory/  candidate questions and the export gate
+app/providers/   paper sources, community sources, model gateway
+app/demo/        the synthetic dataset behind `qri demo`
+```
 
-QRI 的输出是可审计的研究线索和验证说明，不是投资建议、交易信号或收益承诺。项目默认不连接券商、不下单，也不会把统计检验自动包装成可交易策略。任何进入下游量化系统的内容都必须经过人工审核。
+The UI is currently Chinese-only; the code, tests and configuration are in
+English. Translating the templates is a good first contribution.
 
-贡献流程、报告安全问题和本地开发约定分别见 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。项目采用 MIT License，见 [LICENSE](LICENSE)。
+## Scope and limits
+
+QRI is an early but working release. Its output is auditable research leads and
+validation plans — **not investment advice, trading signals, or any expectation
+of return**. It does not connect to a broker, does not place orders, and does
+not turn a statistical test into a tradable strategy. Anything entering a
+downstream system passes a human review first.
+
+Legacy strategy incubation and quick backtesting from earlier versions are kept
+as a read-only archive at `/legacy-strategies`. Every write path is retired and
+returns 410; those records take no part in the radar, ranking, review or export.
+
+Contributions, issues and security reports: [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

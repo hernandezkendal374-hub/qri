@@ -1,8 +1,17 @@
-"""Add research priority bands without changing existing questions."""
+"""Add research priority bands without changing existing questions.
+
+Every step is guarded so the revision is a no-op on a database that the 0001
+baseline already created with this column.
+"""
 
 import sqlalchemy as sa
 
-from alembic import op
+from app.db.migration_guards import (
+    add_column_if_missing,
+    create_index_if_missing,
+    drop_column_if_present,
+    drop_index_if_present,
+)
 
 revision = "0013"
 down_revision = "0012"
@@ -11,13 +20,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
+    add_column_if_missing(
         "research_questions",
         sa.Column("priority_type", sa.String(32), nullable=True, server_default="P3_EXPLORATORY"),
     )
-    op.create_index("ix_research_questions_priority_type", "research_questions", ["priority_type"])
+    create_index_if_missing(
+        "ix_research_questions_priority_type", "research_questions", ["priority_type"]
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_research_questions_priority_type", table_name="research_questions")
-    op.drop_column("research_questions", "priority_type")
+    drop_index_if_present("research_questions", "ix_research_questions_priority_type")
+    drop_column_if_present("research_questions", "priority_type")

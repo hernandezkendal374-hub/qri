@@ -11,6 +11,7 @@ from app.comparison.service import MultiPaperComparisonService
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.demo import seed_demo_database
 from app.discovery.registry import PaperRegistry
 from app.discovery.service import DiscoveryService
 from app.extraction.abstract_brief import AbstractBriefExtractor
@@ -102,6 +103,32 @@ def _uncompared_claimed_paper_ids(session, limit: int = 3) -> list[int]:
 @app.callback()
 def main() -> None:
     """Quant Research Intelligence."""
+
+
+@app.command()
+def demo() -> None:
+    """Fill the database with a synthetic example so the UI can be explored.
+
+    Needs no Postgres, no model endpoint and no network access.  Every record
+    is invented and tagged as demo data; re-running replaces it.
+    """
+    Base.metadata.create_all(engine)
+    with SessionLocal() as session:
+        counts = seed_demo_database(session)
+    typer.echo("Seeded a synthetic QRI demo dataset.")
+    typer.echo(
+        f"  {counts['papers']} papers scanned"
+        f" -> {counts['scout']} scout"
+        f" -> {counts['deep']} deep research"
+    )
+    typer.echo(
+        f"  {counts['claims']} claims with verbatim evidence,"
+        f" {counts['briefs']} research brief,"
+        f" {counts['community_observations']} community observation"
+    )
+    typer.echo("")
+    typer.echo("This data is INVENTED. The papers, authors and numbers do not exist.")
+    typer.echo("Start the UI with:  uvicorn app.main:app --reload")
 
 
 @app.command()

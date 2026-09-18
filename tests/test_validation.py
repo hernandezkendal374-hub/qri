@@ -72,7 +72,7 @@ async def test_validation_spec_persists_dual_wording_and_audit() -> None:
         row = await ResearchValidationService(
             session,
             FixtureLLMProvider([json.dumps(validation_spec(), ensure_ascii=False)]),
-            "claude-sonnet-4-6",
+            "claude-sonnet-5",
         ).generate(question, {"question": {"id": question.id}})
 
         assert row.review_status == "DRAFT"

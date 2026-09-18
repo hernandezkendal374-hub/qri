@@ -1,5 +1,18 @@
+# Secrets and local configuration. .env.example is the only one tracked.
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.yaml
+secrets.yml
+
+# Environments and caches
 .venv/
+venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,8 +23,12 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Local data: databases, downloaded papers, raw research material, logs.
+# None of this belongs in a public repository.
 data/
 *.db
 *.db-shm
 *.db-wal
 *.log
+*.pdf

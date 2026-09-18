@@ -203,14 +203,22 @@ class RadarService:
         score_threshold = (
             threshold if threshold is not None else self.settings.scout_score_threshold
         )
-        ranked = sorted(rows, key=lambda item: item.incremental_value_score, reverse=True)
-        selected = {
-            row.id
+        ranked = sorted(
+            rows,
+            key=lambda item: (item.incremental_value_score, item.id),
+            reverse=True,
+        )
+        # The cap has to be applied to the ranked sequence.  Collecting ids into
+        # a set first would discard the ordering and silently promote whichever
+        # rows the set happened to yield, which in practice meant the oldest
+        # papers rather than the highest-scoring ones.
+        eligible = [
+            row
             for row in ranked
             if row.incremental_value_score >= score_threshold
             and row.change_type != "LOW_INCREMENTAL_VALUE"
-        }
-        selected = set(list(selected)[: max(0, max_items)])
+        ]
+        selected = {row.id for row in eligible[: max(0, max_items)]}
         for row in rows:
             row.decision = "SCOUT" if row.id in selected else "ARCHIVED"
         self.refresh_theme_counts(commit=False)

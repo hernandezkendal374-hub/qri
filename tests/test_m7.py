@@ -31,7 +31,7 @@ def app_with_data(tmp_path: Path) -> tuple[FastAPI, int, int]:
             paper_id=paper.id,
             market="United States",
             mechanism="Investor underreaction",
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             prompt_version="research-card-v1",
         )
         claim = Claim(
