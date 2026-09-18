@@ -9,6 +9,9 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.migration_guards import (
+    drop_column_if_present,
+)
 
 revision: str = "0007"
 down_revision: str | None = "0006"
@@ -26,5 +29,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("papers", "fulltext_attempted_at")
-    op.drop_column("papers", "fulltext_failure_reason")
+    drop_column_if_present("papers", "fulltext_attempted_at")
+    drop_column_if_present("papers", "fulltext_failure_reason")

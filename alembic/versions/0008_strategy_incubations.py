@@ -9,6 +9,10 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.migration_guards import (
+    drop_index_if_present,
+    drop_table_if_present,
+)
 
 revision: str = "0008"
 down_revision: str | None = "0007"
@@ -42,5 +46,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_strategy_incubations_question_id", table_name="strategy_incubations")
-    op.drop_table("strategy_incubations")
+    drop_index_if_present("strategy_incubations", "ix_strategy_incubations_question_id")
+    drop_table_if_present("strategy_incubations")

@@ -9,6 +9,9 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.migration_guards import (
+    drop_table_if_present,
+)
 
 revision: str = "0002"
 down_revision: str | None = "0001"
@@ -45,5 +48,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if sa.inspect(op.get_bind()).has_table("paper_comparisons"):
-        op.drop_table("paper_comparisons")
+    drop_table_if_present("paper_comparisons")
