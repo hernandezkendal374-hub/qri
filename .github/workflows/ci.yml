@@ -116,6 +116,26 @@ jobs:
         env:
           DATABASE_URL: sqlite:///./ci-migrations.db
 
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A committed credential cannot be taken back once the repository is
+    # public, so scan the full history on every change rather than trusting
+    # .gitignore alone.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan history for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The redaction tests must contain credential-shaped fixtures to be
+          # meaningful; .gitleaks.toml allowlists exactly those two files.
+          GITLEAKS_CONFIG: .gitleaks.toml
+
   demo:
     name: Demo dataset
     runs-on: ubuntu-latest

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.redaction import redact_secrets
 from app.models import (
     AbstractBrief,
     AICall,
@@ -263,12 +264,17 @@ def _mark_stage_finished(
         )
         if not stage:
             return
+        # Captured subprocess output is persisted and then rendered on the
+        # dashboard, so it has to be scrubbed first: a traceback carries the
+        # failing request URL, and some APIs take their key as a query
+        # parameter.
+        safe_output = redact_secrets(output)
         stage.status = status
         stage.ended_at = datetime.now(UTC).replace(tzinfo=None)
         stage.metrics_json = {"created": created}
-        stage.checkpoint_json = {"output": output[-2000:]}
+        stage.checkpoint_json = {"output": safe_output[-2000:]}
         if status == "FAILED":
-            stage.error_json = {"return_code": return_code, "message": output[-1000:]}
+            stage.error_json = {"return_code": return_code, "message": safe_output[-1000:]}
         else:
             stage.error_json = None
         if run:

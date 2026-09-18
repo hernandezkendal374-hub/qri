@@ -1,0 +1,14 @@
+# gitleaks configuration for the CI secret scan.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixtures that must look like credentials in order to test redaction"
+paths = [
+  '''tests/test_redaction\.py''',
+  '''app/core/redaction\.py''',
+]
+regexes = [
+  # AWS's own documentation example key.
+  '''AKIAIOSFODNN7EXAMPLE''',
+]
