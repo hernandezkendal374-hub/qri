@@ -11,12 +11,27 @@ Thank you for helping improve QRI. The project values auditable research workflo
 
 ## Local checks
 
-```powershell
+```bash
 pip install -e ".[dev]"
 pytest -q
 ruff check .
 mypy app
 ```
+
+To see your change in the UI without configuring PostgreSQL or a model
+endpoint, seed the synthetic dataset:
+
+```bash
+alembic upgrade head
+qri demo
+uvicorn app.main:app --reload
+```
+
+Schema changes need an Alembic revision whose additive steps are guarded, since
+the 0001 baseline builds the schema from `Base.metadata` and a new database
+already has the columns later revisions add. `tests/test_migrations.py` covers
+upgrade, schema-vs-model parity, idempotency, and a full downgrade cycle; CI
+also runs the chain against PostgreSQL.
 
 ## Pull requests
 
